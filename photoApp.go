@@ -18,7 +18,14 @@ func newUser(email string) {
 	db, err := sql.Open("sqlite3", "/Users/moose1/Downloads/photoApp")
 	defer db.Close()
 	check(err)
-	_, err := db.Exec("insert into users (email) values (?)", email)
+
+	r, err := db.Exec("insert into users (email) values (?)", email)
+	check(err)
+
+	userID, err := r.LastInsertId()
+	check(err)
+	firstAlbum := fmt.Sprintf("%s's Photos", email)
+	_, err := db.Exec("insert into albums (user_id, name) values (?, ?)", userID, firstAlbum)
 	check(err)
 }
 
