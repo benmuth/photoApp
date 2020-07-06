@@ -25,10 +25,10 @@ func newUser(email string) {
 	userID, err := r.LastInsertId()
 	check(err)
 	firstAlbum := fmt.Sprintf("%s's Photos", email)
-	_, err := db.Exec("insert into albums (user_id, name) values (?, ?)", userID, firstAlbum)
+	_, err = db.Exec("insert into albums (user_id, name) values (?, ?)", userID, firstAlbum)
 	check(err)
 }
 
 func main() {
-	fmt.Printf("%v\n", newUser("hello@example.com"))
+	newUser("hello@example.com")
 }
