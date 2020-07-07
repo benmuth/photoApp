@@ -100,7 +100,7 @@ func givePerm(albumID int64, userID int64) {
 	db := openDB()
 	defer db.Close()
 
-	if checkPerm(albumID, userID) == true {
+	if checkPerm(albumID, userID) == false {
 		_, err := db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
 		check(err)
 	} else {
@@ -109,9 +109,8 @@ func givePerm(albumID int64, userID int64) {
 }
 
 func main() {
-	newUser("for@example.com")
-	newAlbum("hello's trip", 1)
-	addPhoto(2, 2)
-	givePerm(2, 2)
-	addPhoto(2, 2)
+	addPhoto(3, 1)
+	addPhoto(3, 2)
+	givePerm(3, 2)
+	addPhoto(3, 2)
 }
