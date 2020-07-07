@@ -33,8 +33,8 @@ func newUser(email string) {
 
 	userID, err := r.LastInsertId()
 	check(err)
-	firstAlbum := fmt.Sprintf("%s's Photos", email)
-	r, err = db.Exec("insert into albums (user_id, name) values (?, ?)", userID, firstAlbum)
+	mainAlbum := fmt.Sprintf("%s's Photos", email)
+	r, err = db.Exec("insert into albums (user_id, name) values (?, ?)", userID, mainAlbum)
 	check(err)
 	albumID, err := r.LastInsertId()
 	check(err)
@@ -109,8 +109,20 @@ func givePerm(albumID int64, userID int64) {
 }
 
 func main() {
+	fmt.Printf("-add two new users\n")
+	newUser("one@ex.com")
+	newUser("two@ex.com")
+	fmt.Printf("-both users add a photo to their main album \n")
+	addPhoto(1, 1)
+	addPhoto(2, 2)
+	fmt.Printf("-user one adds a new album\n")
+	newAlbum("one's birthday trip", 1)
+	fmt.Printf("-user one adds a photo to their new album\n")
 	addPhoto(3, 1)
+	fmt.Printf("-user two tries to add a photo to one's album\n")
 	addPhoto(3, 2)
+	fmt.Printf("-user one shares the album with user two\n")
 	givePerm(3, 2)
+	fmt.Printf("-user two adds the photo to one's album\n")
 	addPhoto(3, 2)
 }
