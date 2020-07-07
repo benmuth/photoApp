@@ -41,7 +41,7 @@ func newUser(email string) {
 	givePerm(albumID, userID)
 }
 
-func newAlbum(name string, userID int) {
+func newAlbum(name string, userID int64) {
 	db := openDB()
 	defer db.Close()
 
@@ -53,7 +53,7 @@ func newAlbum(name string, userID int) {
 }
 
 // checks if the given user has permission to access the given album
-func checkPerm(albumID int, userID int) bool {
+func checkPerm(albumID int64, userID int64) bool {
 	db := openDB()
 	defer db.Close()
 
@@ -62,10 +62,10 @@ func checkPerm(albumID int, userID int) bool {
 	check(err)
 
 	// copy all album ids that the specified user has access to into a slice
-	permittedAlbums := make([]int, 0)
+	permittedAlbums := make([]int64, 0)
 	var i int
 	for permittedAlbumRows.Next() {
-		var newElem int
+		var newElem int64
 		permittedAlbums = append(permittedAlbums, newElem)
 		err = permittedAlbumRows.Scan(permittedAlbums[i])
 		i++
@@ -83,12 +83,12 @@ func checkPerm(albumID int, userID int) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int, userID int) {
+func addPhoto(albumID int64, userID int64) {
 	db := openDB()
 	defer db.Close()
 
 	if checkPerm(albumID, userID) == true {
-		_, err = db.Exec("insert into photos (user_id, album_id) values (?, ?)", userID, albumID)
+		_, err := db.Exec("insert into photos (user_id, album_id) values (?, ?)", userID, albumID)
 		check(err)
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
@@ -96,12 +96,12 @@ func addPhoto(albumID int, userID int) {
 }
 
 // give a user permission to view and add photos to an album
-func givePerm(albumID int, userID int) {
+func givePerm(albumID int64, userID int64) {
 	db := openDB()
 	defer db.Close()
 
 	if checkPerm(albumID, userID) == true {
-		_, err = db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
+		_, err := db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
 		check(err)
 	} else {
 		fmt.Printf("That user already has permission to access the album!\n")
@@ -109,7 +109,9 @@ func givePerm(albumID int, userID int) {
 }
 
 func main() {
-	//newUser("hello@example.com")
+	newUser("for@example.com")
 	newAlbum("hello's trip", 1)
-
+	addPhoto(2, 2)
+	givePerm(2, 2)
+	addPhoto(2, 2)
 }
