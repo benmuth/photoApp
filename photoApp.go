@@ -34,16 +34,22 @@ func newUser(email string) {
 	userID, err := r.LastInsertId()
 	check(err)
 	firstAlbum := fmt.Sprintf("%s's Photos", email)
-	_, err = db.Exec("insert into albums (user_id, name) values (?, ?)", userID, firstAlbum)
+	r, err = db.Exec("insert into albums (user_id, name) values (?, ?)", userID, firstAlbum)
 	check(err)
+	albumID, err := r.LastInsertId()
+	check(err)
+	givePerm(albumID, userID)
 }
 
 func newAlbum(name string, userID int) {
 	db := openDB()
 	defer db.Close()
 
-	_, err = db.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
+	r, err := db.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
 	check(err)
+	albumID, err := r.LastInsertId()
+	check(err)
+	givePerm(albumID, userID)
 }
 
 // checks if the given user has permission to access the given album
@@ -65,7 +71,7 @@ func checkPerm(albumID int, userID int) bool {
 		i++
 	}
 
-	// iterate through the slice of album ids until an id matches the specified album id parameter
+	// iterate through the slice of album ids until an id matches the specified album id parameter and set hasPerm accordingly
 	var hasPerm bool
 	for _, permittedAlbum := range permittedAlbums {
 		if permittedAlbum == albumID {
@@ -103,6 +109,7 @@ func givePerm(albumID int, userID int) {
 }
 
 func main() {
-	newUser("hello@example.com")
+	//newUser("hello@example.com")
 	newAlbum("hello's trip", 1)
+
 }
