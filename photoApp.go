@@ -61,15 +61,23 @@ func checkPerm(albumID int64, userID int64) bool {
 	defer permittedAlbumRows.Close()
 	check(err)
 
+	//columns, err := permittedAlbumRows.Columns()
+	//fmt.Printf("columns of query from album permissions: %s\n", columns)
+
 	// copy all album ids that the specified user has access to into a slice
 	permittedAlbums := make([]int64, 0)
 	var i int
 	for permittedAlbumRows.Next() {
 		var newElem int64
+		err = permittedAlbumRows.Scan(newElem)
+		check(err)
 		permittedAlbums = append(permittedAlbums, newElem)
-		err = permittedAlbumRows.Scan(permittedAlbums[i])
+		err = permittedAlbumRows.Scan(&permittedAlbums[i])
+		check(err)
 		i++
 	}
+
+	fmt.Printf("permitted albums for user %v: %v\n", userID, permittedAlbums)
 
 	// iterate through the slice of album ids until an id matches the specified album id parameter and set hasPerm accordingly
 	var hasPerm bool
@@ -109,20 +117,23 @@ func givePerm(albumID int64, userID int64) {
 }
 
 func main() {
-	fmt.Printf("-add two new users\n")
+	/*fmt.Printf("-add two new users\n")
 	newUser("one@ex.com")
 	newUser("two@ex.com")
+	*/
 	fmt.Printf("-both users add a photo to their main album \n")
 	addPhoto(1, 1)
 	addPhoto(2, 2)
-	fmt.Printf("-user one adds a new album\n")
-	newAlbum("one's birthday trip", 1)
+	/*
+		fmt.Printf("-user one adds a new album\n")
+		newAlbum("one's birthday trip", 1)
+	*/
 	fmt.Printf("-user one adds a photo to their new album\n")
 	addPhoto(3, 1)
 	fmt.Printf("-user two tries to add a photo to one's album\n")
 	addPhoto(3, 2)
-	fmt.Printf("-user one shares the album with user two\n")
-	givePerm(3, 2)
-	fmt.Printf("-user two adds the photo to one's album\n")
-	addPhoto(3, 2)
+	//fmt.Printf("-user one shares the album with user two\n")
+	//givePerm(3, 2)
+	//fmt.Printf("-user two adds the photo to one's album\n")
+	//addPhoto(3, 2)
 }
