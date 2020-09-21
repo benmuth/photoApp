@@ -144,6 +144,34 @@ func showTaggedAlbums(userID int64, db *sql.DB) []int64 {
 	return taggedAlbums
 }
 
+func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
+	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_id = ?", userID)
+	defer taggedPhotoRows.Close()
+	check(err)
+
+	taggedPhotos := make([]int64, 0)
+	for i := 0; taggedPhotoRows.Next(); i++ {
+		var newElem int64
+		taggedPhotos = append(taggedPhotos, newElem)
+		err := taggedPhotoRows.Scan(&taggedPhotos[i])
+		check(err)
+	}
+
+	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_id = ?", userID)
+	defer taggedAlbumRows.Close()
+	check(err)
+
+	taggedAlbums := make([]int64, 0)
+	for i := 0; taggedAlbumRows.Next(); i++ {
+		var newElem int64
+		taggedAlbums = append(taggedAlbums, newElem)
+		err := taggedAlbumRows.Scan(&taggedAlbums[i])
+		check(err)
+	}
+
+	return taggedPhotos, taggedAlbums
+}
+
 func main() {
 	/*fmt.Printf("-add two new users\n")
 	newUser("one@ex.com")
