@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const init = "CREATE TABLE users (id integer primary key, email text unique);\n" +
+const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
 	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
 	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id));\n" +
 	"CREATE TABLE album_permissions (album_id integer references albums(id), user_id integer references users(id), unique (album_id, user_id));\n" +
@@ -28,7 +28,7 @@ func TestPerm(t *testing.T) {
 	check(err)
 	defer db.Close()
 
-	_, err = db.Exec(init)
+	_, err = db.Exec(dbInit)
 	check(err)
 
 	examples := []struct {
