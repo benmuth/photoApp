@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const testDBInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
+const init = "CREATE TABLE users (id integer primary key, email text unique);\n" +
 	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
 	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id));\n" +
 	"CREATE TABLE album_permissions (album_id integer references albums(id), user_id integer references users(id), unique (album_id, user_id));\n" +
@@ -28,7 +28,7 @@ func TestPerm(t *testing.T) {
 	check(err)
 	defer db.Close()
 
-	_, err = db.Exec(testDBInit)
+	_, err = db.Exec(init)
 	check(err)
 
 	examples := []struct {
@@ -57,6 +57,39 @@ func TestPerm(t *testing.T) {
 			if got != ex.want {
 				t.Fatalf("got %v, want %v\n", got, ex.want)
 			}
+		})
+	}
+}
+
+func TestTags(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	check(err)
+	defer db.Close()
+
+	_, err = db.Exec(init)
+	check(err)
+
+	examples := []struct {
+		name   string
+		userID int64
+		want   []int64
+	}{
+		{
+			name:   "one tag",
+			userID: 2,
+			want:   []int64{3},
+		},
+	}
+
+	for _, ex := range examples {
+		t.Run(ex.name, func(t *testing.T) {
+			got := showTaggedPhotos(ex.userID, db)
+			for i := range got {
+				if got[i] != ex.want[i] {
+					t.Fatalf("got %v, want %v\n", got[i], ex.want[i])
+				}
+			}
+
 		})
 	}
 }
