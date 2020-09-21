@@ -11,12 +11,13 @@ import (
 )
 
 // these functions are to be used with a database that includes following tables (! = primary key):
-// userid!|email			albumid!|userid|name			photoid!|albumid|userid		albumid|userid
+// users: id!|email		albums: id!|userid|name	photos: id!|albumid|userid		album_permissions: albumid|userid	tags: photo_id|tagged_id
 
 type photoInfo struct {
-	photoID int
-	albumID int
-	userID  int
+	photoID   int
+	albumID   int
+	userID    int
+	tagged_id int
 }
 
 func check(e error) {
@@ -33,11 +34,7 @@ func openDB() *sql.DB {
 }
 
 // create a new user along with an initial album
-func newUser(email string, database string) {
-	db, err := sql.Open("sqlite3", database)
-	check(err)
-	defer db.Close()
-
+func newUser(email string, db *sql.DB) {
 	r, err := db.Exec("insert into users (email) values (?)", email)
 	check(err)
 
@@ -48,27 +45,19 @@ func newUser(email string, database string) {
 	check(err)
 	albumID, err := r.LastInsertId()
 	check(err)
-	givePerm(albumID, userID, database)
+	givePerm(albumID, userID, db)
 }
 
-func newAlbum(name string, userID int64, database string) {
-	db, err := sql.Open("sqlite3", database)
-	check(err)
-	defer db.Close()
-
+func newAlbum(name string, userID int64, db *sql.DB) {
 	r, err := db.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
 	check(err)
 	albumID, err := r.LastInsertId()
 	check(err)
-	givePerm(albumID, userID, database)
+	givePerm(albumID, userID, db)
 }
 
 // checks if the given user has permission to access the given album
-func checkPerm(albumID int64, userID int64, database string) bool {
-	db, err := sql.Open("sqlite3", database)
-	check(err)
-	defer db.Close()
-
+func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 	//retrieve all albums that a user has access to
 	permittedAlbumRows, err := db.Query("select album_id from album_permissions where user_id = ? and album_id = ?", userID, albumID)
 	defer permittedAlbumRows.Close()
@@ -105,27 +94,19 @@ func checkPerm(albumID int64, userID int64, database string) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, database string) {
-	db, err := sql.Open("sqlite3", database)
-	check(err)
-	defer db.Close()
-
-	if checkPerm(albumID, userID, database) == true {
+func addPhoto(albumID int64, userID int64, db *sql.DB) {
+	if checkPerm(albumID, userID, db) == true {
 		_, err := db.Exec("insert into photos (user_id, album_id) values (?, ?)", userID, albumID)
 		check(err)
-
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
 	}
+	//add a tag feature to this function?
 }
 
 // give a user permission to view and add photos to an album
-func givePerm(albumID int64, userID int64, database string) {
-	db, err := sql.Open("sqlite3", database)
-	check(err)
-	defer db.Close()
-
-	if checkPerm(albumID, userID, database) == false {
+func givePerm(albumID int64, userID int64, db *sql.DB) {
+	if checkPerm(albumID, userID, db) == false {
 		_, err := db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
 		check(err)
 	} else {
@@ -133,14 +114,31 @@ func givePerm(albumID int64, userID int64, database string) {
 	}
 }
 
+func showTaggedPhotos(userID int64, db *sql.DB) []int64 {
+	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos(id) = tags(photo_id) WHERE tagged_id = ?", userID)
+	defer taggedPhotoRows.Close()
+	check(err)
+
+	taggedPhotos := make([]int64, 0)
+	for i := 0; taggedPhotoRows.Next(); i++ {
+		var newElem int64
+		taggedPhotos = append(taggedPhotos, newElem)
+		err := taggedPhotoRows.Scan(taggedPhotos[i])
+		check(err)
+	}
+	return taggedPhotos
+}
+
 func main() {
 	/*fmt.Printf("-add two new users\n")
 	newUser("one@ex.com")
 	newUser("two@ex.com")
 	*/
-	maindb := "/Users/moose1/Downloads/photoApp"
-	fmt.Printf("User 1 can access album 3: %v\n", checkPerm(3, 1, maindb))
-	fmt.Printf("User 2 can access album 1: %v\n", checkPerm(2, 1, maindb))
+	db, err := sql.Open("sqlite3", "/Users/moose1/Downloads/photoApp")
+	check(err)
+	defer db.Close()
+	fmt.Printf("User 1 can access album 3: %v\n", checkPerm(3, 1, db))
+	fmt.Printf("User 2 can access album 1: %v\n", checkPerm(2, 1, db))
 	//testdb := ":memory:"
 	//fmt.Printf("-both users add a photo to their main album \n")
 	//addPhoto(1, 1, maindb)
