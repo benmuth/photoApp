@@ -22,15 +22,14 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 	"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (4, 3);\n"
 
-	
 func TestPerm(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	check(err)
 	defer db.Close()
 
 	_, err = db.Exec(dbInit + "INSERT INTO album_permissions (album_id, user_id) VALUES (1, 1);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (2, 2);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (3, 2);\n")
+		"INSERT INTO album_permissions (album_id, user_id) VALUES (2, 2);\n" +
+		"INSERT INTO album_permissions (album_id, user_id) VALUES (3, 2);\n")
 	check(err)
 
 	examples := []struct {
@@ -68,10 +67,9 @@ func TestTags(t *testing.T) {
 	check(err)
 	defer db.Close()
 
-	_, err = db.Exec(dbInit + 	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (3, 2);\n" + 
-	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (4, 1);\n" + 
-	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (4, 2);\n"
-	)
+	_, err = db.Exec(dbInit + "INSERT INTO tags (photo_id, tagged_user_id) VALUES (3, 2);\n" +
+		"INSERT INTO tags (photo_id, tagged_user_id) VALUES (4, 1);\n" +
+		"INSERT INTO tags (photo_id, tagged_user_id) VALUES (4, 2);\n")
 	check(err)
 
 	examples := []struct {
@@ -81,20 +79,20 @@ func TestTags(t *testing.T) {
 		wantAlbums []int64
 	}{
 		{
-			name: "no tags",
-			userID: 3,
+			name:       "no tags",
+			userID:     3,
 			wantPhotos: []int64{},
 			wantAlbums: []int64{},
 		},
 		{
 			name:       "one tag",
-			userID:     2,
-			wantPhotos: []int64{3},
-			wantAlbums: []int64{3},
+			userID:     1,
+			wantPhotos: []int64{4},
+			wantAlbums: []int64{4},
 		},
 		{
-			name:	"two tags",
-			userID: 2,
+			name:       "two tags",
+			userID:     2,
 			wantPhotos: []int64{3, 4},
 			wantAlbums: []int64{3, 4},
 		},
@@ -105,12 +103,12 @@ func TestTags(t *testing.T) {
 			gotPhotos, gotAlbums := showTags(ex.userID, db)
 			for i := range gotPhotos {
 				if gotPhotos[i] != ex.wantPhotos[i] {
-					t.Fatalf("got %v, want %v\n", gotPhotos[i], ex.wantPhotos[i])
+					t.Fatalf("got photo %v, want photo %v\n", gotPhotos[i], ex.wantPhotos[i])
 				}
 			}
 			for i := range gotAlbums {
 				if gotAlbums[i] != ex.wantAlbums[i] {
-					t.Fatalf("got %v, want %v\n", gotAlbums[i], ex.wantAlbums[i])
+					t.Fatalf("got album %v, want album %v\n", gotAlbums[i], ex.wantAlbums[i])
 				}
 			}
 		})
