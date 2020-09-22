@@ -12,23 +12,25 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 	"CREATE TABLE tags (photo_id references photos(id), tagged_user_id references users(id), unique (photo_id, tagged_user_id));\n" +
 	"INSERT INTO users (email) VALUES ('user1@example.com');\n" +
 	"INSERT INTO users (email) VALUES ('user2@example.com');\n" +
+	"INSERT INTO users (email) VALUES ('user3@example.com');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (2, '2 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1s Birthday!');\n" +
+	"INSERT INTO albums (user_id, name) VALUES (3, '3 main');\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (1, 1);\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (1, 1);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (2, 2);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (3, 2);\n" +
-	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (3, 2);\n"
+	"INSERT INTO photos (album_id, user_id) VALUES (4, 3);\n"
 
+	
 func TestPerm(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	check(err)
 	defer db.Close()
 
-	_, err = db.Exec(dbInit)
+	_, err = db.Exec(dbInit + "INSERT INTO album_permissions (album_id, user_id) VALUES (1, 1);\n" +
+	"INSERT INTO album_permissions (album_id, user_id) VALUES (2, 2);\n" +
+	"INSERT INTO album_permissions (album_id, user_id) VALUES (3, 2);\n")
 	check(err)
 
 	examples := []struct {
@@ -66,7 +68,10 @@ func TestTags(t *testing.T) {
 	check(err)
 	defer db.Close()
 
-	_, err = db.Exec(dbInit)
+	_, err = db.Exec(dbInit + 	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (3, 2);\n" + 
+	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (4, 1);\n" + 
+	"INSERT INTO tags (photo_id, tagged_user_id) VALUES (4, 2);\n"
+	)
 	check(err)
 
 	examples := []struct {
@@ -76,10 +81,22 @@ func TestTags(t *testing.T) {
 		wantAlbums []int64
 	}{
 		{
+			name: "no tags",
+			userID: 3,
+			wantPhotos: []int64{},
+			wantAlbums: []int64{},
+		},
+		{
 			name:       "one tag",
 			userID:     2,
 			wantPhotos: []int64{3},
 			wantAlbums: []int64{3},
+		},
+		{
+			name:	"two tags",
+			userID: 2,
+			wantPhotos: []int64{3, 4},
+			wantAlbums: []int64{3, 4},
 		},
 	}
 
