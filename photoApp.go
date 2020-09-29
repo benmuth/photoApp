@@ -1,24 +1,30 @@
 package main
 
-import (
-	"database/sql"
-	"fmt"
-	_ "image/jpeg"
-	_ "image/png"
-	"log"
-
-	_ "github.com/mattn/go-sqlite3"
-)
-
-// these functions are to be used with a database that includes following tables (! = primary key):
-// users: id!|email		albums: id!|userid|name	photos: id!|albumid|userid		album_permissions: albumid|userid	tags: photo_id|tagged_id
-
+/*
 type photoInfo struct {
 	photoID   int
 	albumID   int
 	userID    int
 	tagged_id int
 }
+*/
+
+import (
+	"database/sql"
+	"fmt"
+	"html/template"
+	_ "image/jpeg"
+	_ "image/png"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"strconv"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// these functions are to be used with a database that includes following tables (! = primary key):
+// users: id!|email		albums: id!|userid|name	     photos: id!|albumid|userid		album_permissions: albumid|userid	tags: photo_id|tagged_id
 
 func check(e error) {
 	if e != nil {
@@ -26,11 +32,18 @@ func check(e error) {
 	}
 }
 
-func openDB() *sql.DB {
-	//dbName := fmt.Sprintf("/Users/moose1/Downloads/%s", name)
-	db, err := sql.Open("sqlite3", "/Users/moose1/Downloads/photoApp")
-	check(err)
-	return db
+var templates = template.Must(template.ParseFiles("templates/home.html"))
+
+func renderTemplate(w http.ResponseWriter, tmpl string, p *page) {
+	err := templates.ExecuteTemplate(w, tmpl+".html", p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+type page struct {
+	UserId int64
+	Albums []int64
 }
 
 // create a new user along with an initial album
@@ -94,9 +107,15 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, db *sql.DB) {
+func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) {
 	if checkPerm(albumID, userID, db) == true {
-		_, err := db.Exec("insert into photos (user_id, album_id) values (?, ?)", userID, albumID)
+		res, err := db.Exec("insert into photos (user_id, album_id) values (?, ?)", userID, albumID)
+		check(err)
+		photoId, err := res.LastInsertId()
+		check(err)
+		photoData, err := ioutil.ReadFile(photoPath)
+		check(err)
+		err = ioutil.WriteFile("Photos/"+strconv.Itoa(photoId), photoData, 00007)
 		check(err)
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
@@ -114,38 +133,8 @@ func givePerm(albumID int64, userID int64, db *sql.DB) {
 	}
 }
 
-func showTaggedPhotos(userID int64, db *sql.DB) []int64 {
-	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_id = ?", userID)
-	defer taggedPhotoRows.Close()
-	check(err)
-
-	taggedPhotos := make([]int64, 0)
-	for i := 0; taggedPhotoRows.Next(); i++ {
-		var newElem int64
-		taggedPhotos = append(taggedPhotos, newElem)
-		err := taggedPhotoRows.Scan(&taggedPhotos[i])
-		check(err)
-	}
-	return taggedPhotos
-}
-
-func showTaggedAlbums(userID int64, db *sql.DB) []int64 {
-	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_id = ?", userID)
-	defer taggedAlbumRows.Close()
-	check(err)
-
-	taggedAlbums := make([]int64, 0)
-	for i := 0; taggedAlbumRows.Next(); i++ {
-		var newElem int64
-		taggedAlbums = append(taggedAlbums, newElem)
-		err := taggedAlbumRows.Scan(&taggedAlbums[i])
-		check(err)
-	}
-	return taggedAlbums
-}
-
 func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
-	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_id = ?", userID)
+	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedPhotoRows.Close()
 	check(err)
 
@@ -157,7 +146,7 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
 		check(err)
 	}
 
-	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_id = ?", userID)
+	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedAlbumRows.Close()
 	check(err)
 
@@ -182,20 +171,4 @@ func main() {
 	defer db.Close()
 	fmt.Printf("User 1 can access album 3: %v\n", checkPerm(3, 1, db))
 	fmt.Printf("User 2 can access album 1: %v\n", checkPerm(2, 1, db))
-	//testdb := ":memory:"
-	//fmt.Printf("-both users add a photo to their main album \n")
-	//addPhoto(1, 1, maindb)
-	//addPhoto(2, 2, maindb)
-	/*
-		fmt.Printf("-user one adds a new album\n")
-		newAlbum("one's birthday trip", 1)
-	*/
-	//fmt.Printf("-user one adds a photo to their new album\n")
-	//addPhoto(3, 1, maindb)
-	//fmt.Printf("-user two tries to add a photo to one's album\n")
-	//addPhoto(3, 2, maindb)
-	//fmt.Printf("-user one shares the album with user two\n")
-	//givePerm(3, 2)
-	//fmt.Printf("-user two adds the photo to one's album\n")
-	//addPhoto(3, 2)
 }
