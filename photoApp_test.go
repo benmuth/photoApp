@@ -114,3 +114,38 @@ func TestTags(t *testing.T) {
 		})
 	}
 }
+
+func TestAddPhoto(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	check(err)
+	defer db.Close()
+
+	_, err = db.Exec(dbInit + "INSERT INTO album_permissions (album_id, user_id) VALUES (1, 1);\n" +
+		"INSERT INTO album_permissions (album_id, user_id) VALUES (2, 2);\n" +
+		"INSERT INTO album_permissions (album_id, user_id) VALUES (3, 2);\n")
+	check(err)
+
+	examples := []struct {
+		name      string
+		user      int64
+		album     int64
+		photoPath string
+	}{
+		{
+			name:      "basic insert",
+			user:      1,
+			album:     1,
+			photoPath: "/Users/moose1/Documents/reference/Scrampy.jpg",
+		},
+	}
+
+	for _, ex := range examples {
+		t.Run(ex.name, func(t *testing.T) {
+			photoId := addPhoto(ex.album, ex.user, ex.photoPath, db)
+			photoRow := db.QueryRow("SELECT user_id FROM photos WHERE id = ?", photoId)
+			if err = photoRow.Scan(&userId); err != nil {
+				t.Fatalf("ERR: %s\n", err)
+			}
+		})
+	}
+}
