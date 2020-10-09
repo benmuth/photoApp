@@ -6,6 +6,7 @@ type photoInfo struct {
 	albumID   int
 	userID    int
 	tagged_id int
+	time	time.Time
 }
 */
 
@@ -23,6 +24,18 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
+	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
+	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id));\n" +
+	"INSERT INTO users (email) VALUES ('user1@example.com');\n" +
+	"INSERT INTO users (email) VALUES ('user2@example.com');\n" +
+	"INSERT INTO albums (user_id, name) VALUES (1, '1 main');\n" +
+	"INSERT INTO albums (user_id, name) VALUES (2, '2 main');\n" +
+	"INSERT INTO albums (user_id, name) VALUES (1, '1s Birthday!');\n" +
+	"INSERT INTO photos (album_id, user_id) VALUES (1, 1);\n" +
+	"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
+	"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n"
+
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|albumid|userid		album_permissions: albumid|userid	tags: photo_id|tagged_id
 
@@ -30,20 +43,6 @@ func check(e error) {
 	if e != nil {
 		log.Fatal(e)
 	}
-}
-
-var templates = template.Must(template.ParseFiles("templates/home.html"))
-
-func renderTemplate(w http.ResponseWriter, tmpl string, p *page) {
-	err := templates.ExecuteTemplate(w, tmpl+".html", p)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-type page struct {
-	UserId int64
-	Albums []int64
 }
 
 // create a new user along with an initial album
@@ -89,37 +88,25 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 		hasPerm = true
 	}
 	return hasPerm
-	/*
-		//columns, err := permittedAlbumRows.Columns()
-		//fmt.Printf("columns of query from album permissions: %s\n", columns)
-		//fmt.Printf("permitted albums for user %v: %v\n", userID, permittedAlbums)
-
-		// iterate through the slice of album ids until an id matches the specified album id parameter and set hasPerm accordingly
-		var hasPerm bool
-		for _, permittedAlbum := range permittedAlbums {
-			if permittedAlbum == albumID {
-				hasPerm = true
-				break
-			}
-		}
-		return hasPerm
-	*/
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) {
+func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
+	var photoID int64
 	if checkPerm(albumID, userID, db) == true {
-		res, err := db.Exec("insert into photos (user_id, album_id) values (?, ?)", userID, albumID)
+		res, err := db.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
 		check(err)
-		photoId, err := res.LastInsertId()
+
+		photoID, err = res.LastInsertId()
 		check(err)
 		photoData, err := ioutil.ReadFile(photoPath)
 		check(err)
-		err = ioutil.WriteFile("Photos/"+strconv.Itoa(photoId), photoData, 00007)
+		err = ioutil.WriteFile("Photos/"+strconv.FormatInt(photoID, 10), photoData, 00007)
 		check(err)
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
 	}
+	return photoID
 	//add a tag feature to this function?
 }
 
@@ -157,18 +144,67 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
 		err := taggedAlbumRows.Scan(&taggedAlbums[i])
 		check(err)
 	}
-
 	return taggedPhotos, taggedAlbums
 }
 
-func main() {
-	/*fmt.Printf("-add two new users\n")
-	newUser("one@ex.com")
-	newUser("two@ex.com")
-	*/
-	db, err := sql.Open("sqlite3", "/Users/moose1/Downloads/photoApp")
+var templates = template.Must(template.ParseFiles("templates/home.html"))
+
+type page struct {
+	UserID int64
+	Albums []int64
+}
+
+func loadPage(userID int64, db *sql.DB) (*page, error) {
+	userEmailResult := db.QueryRow("SELECT email FROM users WHERE id = ?", userID)
+	var userEmail string
+	err := userEmailResult.Scan(&userEmail)
 	check(err)
-	defer db.Close()
-	fmt.Printf("User 1 can access album 3: %v\n", checkPerm(3, 1, db))
-	fmt.Printf("User 2 can access album 1: %v\n", checkPerm(2, 1, db))
+	/*
+		filename := strconv.FormatInt(userId, 10) + ".txt"
+		body, err := ioutil.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+	*/
+	albumsResult, err := db.Query("SELECT id FROM albums WHERE user_id = ?", userID)
+	check(err)
+	albums := make([]int64, 0)
+	for i := 0; albumsResult.Next(); i++ {
+		var newElem int64
+		albums = append(albums, newElem)
+		err = albumsResult.Scan(&albums[i])
+		check(err)
+	}
+	return &page{UserID: userID, Albums: albums}, nil
+}
+
+func homeHandler(w http.ResponseWriter, r *http.Request, userID int64, db *sql.DB) {
+	p, err := loadPage(userID, db)
+	log.Printf("Page: %+v", p)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	err = templates.ExecuteTemplate(w, "home.html", *p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func makeHandler(fn func(http.ResponseWriter, *http.Request, int64, *sql.DB)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		db, err := sql.Open("sqlite3", ":memory:")
+		check(err)
+		defer db.Close()
+
+		_, err = db.Exec(dbInit)
+		check(err)
+
+		fn(w, r, 1, db)
+	}
+}
+
+func main() {
+	http.HandleFunc("/home/", makeHandler(homeHandler))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
