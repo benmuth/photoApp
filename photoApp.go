@@ -149,23 +149,36 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
 
 var templates = template.Must(template.ParseFiles("templates/home.html"))
 
-type page struct {
+type page interface {
+	query() string
+	render(w http.ResponseWriter, r sql.Result)
+}
+
+type homepage struct {
 	UserID int64
 	Albums []int64
 }
 
+func (h homepage) query() string {
+	//TODO: get user_id from http request header
+	return "SELECT id FROM albums WHERE user_id = 1"
+}
+
+// TODO: handle errors instead of panicking
+func (h homepage) render(w http.ResponseWriter, r sql.Result) error {
+	albums := make([]int64, 0)
+	for i := 0; r.Next(); i++ {
+		var newElem int64
+		albums = append(albums, newElem)
+		err = albumsResult.Scan(&albums[i])
+		return err
+	}
+	h.Albums = albums
+	h.UserID = 1
+	return templates.ExecuteTemplate(w, "home.html", h)
+}
+
 func loadPage(userID int64, db *sql.DB) (*page, error) {
-	userEmailResult := db.QueryRow("SELECT email FROM users WHERE id = ?", userID)
-	var userEmail string
-	err := userEmailResult.Scan(&userEmail)
-	check(err)
-	/*
-		filename := strconv.FormatInt(userId, 10) + ".txt"
-		body, err := ioutil.ReadFile(filename)
-		if err != nil {
-			return nil, err
-		}
-	*/
 	albumsResult, err := db.Query("SELECT id FROM albums WHERE user_id = ?", userID)
 	check(err)
 	albums := make([]int64, 0)
@@ -178,20 +191,16 @@ func loadPage(userID int64, db *sql.DB) (*page, error) {
 	return &page{UserID: userID, Albums: albums}, nil
 }
 
-func homeHandler(w http.ResponseWriter, r *http.Request, userID int64, db *sql.DB) {
-	p, err := loadPage(userID, db)
-	log.Printf("Page: %+v", p)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	err = templates.ExecuteTemplate(w, "home.html", *p)
+func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	//p, err := loadPage(userID, db)
+	h := homepage{}
+	err := h.render(w, db.Query(h.query))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, int64, *sql.DB)) http.HandlerFunc {
+func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		db, err := sql.Open("sqlite3", ":memory:")
 		check(err)
@@ -200,7 +209,7 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, int64, *sql.DB)) ht
 		_, err = db.Exec(dbInit)
 		check(err)
 
-		fn(w, r, 1, db)
+		fn(w, r, db)
 	}
 }
 
