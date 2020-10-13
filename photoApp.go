@@ -165,19 +165,26 @@ func (h homepage) query() string {
 }
 
 // TODO: handle errors instead of panicking
-func (h homepage) render(w http.ResponseWriter, r sql.Result) error {
+func (h homepage) render(w http.ResponseWriter, r *sql.Rows) error {
+	if r == nil {
+		fmt.Printf("ERR: rows is nil\n")
+	}
 	albums := make([]int64, 0)
 	for i := 0; r.Next(); i++ {
 		var newElem int64
 		albums = append(albums, newElem)
-		err = albumsResult.Scan(&albums[i])
-		return err
+		err := r.Scan(&albums[i])
+		if err != nil {
+			return err
+		}
 	}
+	fmt.Printf("query result: %+v\n", albums)
 	h.Albums = albums
 	h.UserID = 1
 	return templates.ExecuteTemplate(w, "home.html", h)
 }
 
+/*
 func loadPage(userID int64, db *sql.DB) (*page, error) {
 	albumsResult, err := db.Query("SELECT id FROM albums WHERE user_id = ?", userID)
 	check(err)
@@ -190,11 +197,15 @@ func loadPage(userID int64, db *sql.DB) (*page, error) {
 	}
 	return &page{UserID: userID, Albums: albums}, nil
 }
-
+*/
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	//p, err := loadPage(userID, db)
 	h := homepage{}
-	err := h.render(w, db.Query(h.query))
+	result, err := db.Query(h.query())
+	if err != nil {
+		log.Panic("ERROR: invalid user id\n")
+	}
+	err = h.render(w, result)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
