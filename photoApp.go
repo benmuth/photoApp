@@ -33,6 +33,7 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 	"INSERT INTO albums (user_id, name) VALUES (2, '2 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1s Birthday!');\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (1, 1);\n" +
+	"INSERT INTO photos (album_id, user_id) VALUES (1, 1);\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n"
 
@@ -159,16 +160,22 @@ type homepage struct {
 	Albums []int64
 }
 
+type albumpage struct {
+	AlbumID int64
+	Photos  []int64
+}
+
 func (h homepage) query() string {
 	//TODO: get user_id from http request header
 	return "SELECT id FROM albums WHERE user_id = 1"
 }
 
+func (a albumpage) query() string {
+	return "SELECT id FROM photos WHERE album_id = 1"
+}
+
 // TODO: handle errors instead of panicking
 func (h homepage) render(w http.ResponseWriter, r *sql.Rows) error {
-	if r == nil {
-		fmt.Printf("ERR: rows is nil\n")
-	}
 	albums := make([]int64, 0)
 	for i := 0; r.Next(); i++ {
 		var newElem int64
@@ -184,28 +191,40 @@ func (h homepage) render(w http.ResponseWriter, r *sql.Rows) error {
 	return templates.ExecuteTemplate(w, "home.html", h)
 }
 
-/*
-func loadPage(userID int64, db *sql.DB) (*page, error) {
-	albumsResult, err := db.Query("SELECT id FROM albums WHERE user_id = ?", userID)
-	check(err)
-	albums := make([]int64, 0)
-	for i := 0; albumsResult.Next(); i++ {
+func (a albumpage) render(w http.ResponseWriter, r *sql.Rows) error {
+	photos := make([]int64, 0)
+	for i := 0; r.Next(); i++ {
 		var newElem int64
-		albums = append(albums, newElem)
-		err = albumsResult.Scan(&albums[i])
-		check(err)
+		photos = append(photos, newElem)
+		err := r.Scan(&photos[i])
+		if err != nil {
+			return err
+		}
 	}
-	return &page{UserID: userID, Albums: albums}, nil
+	a.Photos = photos
+	a.AlbumID = 1
+	return templates.ExecuteTemplate(w, "album.html")
 }
-*/
+
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	//p, err := loadPage(userID, db)
 	h := homepage{}
 	result, err := db.Query(h.query())
 	if err != nil {
 		log.Panic("ERROR: invalid user id\n")
 	}
 	err = h.render(w, result)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	a := albumpage{}
+	result, err := db.Query(a.query())
+	if err != nil {
+		log.Panic("ERROR: invalid album\n")
+	}
+	err = a.render(w, result)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -226,5 +245,6 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.Hand
 
 func main() {
 	http.HandleFunc("/home/", makeHandler(homeHandler))
+	http.HandleFunc("/album/", makeHandler(albumHandler))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
