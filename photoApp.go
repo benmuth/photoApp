@@ -148,7 +148,7 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
 	return taggedPhotos, taggedAlbums
 }
 
-var templates = template.Must(template.ParseFiles("templates/home.html"))
+var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html"))
 
 type page interface {
 	query() string
@@ -163,6 +163,10 @@ type homepage struct {
 type albumpage struct {
 	AlbumID int64
 	Photos  []int64
+}
+
+type photopage struct {
+	PhotoID int64
 }
 
 func (h homepage) query() string {
@@ -185,7 +189,6 @@ func (h homepage) render(w http.ResponseWriter, r *sql.Rows) error {
 			return err
 		}
 	}
-	fmt.Printf("query result: %+v\n", albums)
 	h.Albums = albums
 	h.UserID = 1
 	return templates.ExecuteTemplate(w, "home.html", h)
@@ -203,7 +206,13 @@ func (a albumpage) render(w http.ResponseWriter, r *sql.Rows) error {
 	}
 	a.Photos = photos
 	a.AlbumID = 1
-	return templates.ExecuteTemplate(w, "album.html")
+	return templates.ExecuteTemplate(w, "album.html", a)
+}
+
+func (p photopage) render(w http.ResponseWriter) error {
+	// get photoId from http request instead of db query?
+	p.PhotoID = 1
+	return templates.ExecuteTemplate(w, "photo.html", p)
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -230,6 +239,15 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
+func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	p := photopage{}
+	// get photoId from http request instead of db query?
+	err := p.render(w)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		db, err := sql.Open("sqlite3", ":memory:")
@@ -246,5 +264,6 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.Hand
 func main() {
 	http.HandleFunc("/home/", makeHandler(homeHandler))
 	http.HandleFunc("/album/", makeHandler(albumHandler))
+	http.HandleFunc("/photo/", makeHandler(photoHandler))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
