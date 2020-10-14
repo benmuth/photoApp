@@ -1,0 +1,20 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset = "UTF-8">
+  <title>album: {{.AlbumID}}</title>
+</head>
+<h1>album: {{.AlbumID}}</h1>
+<body>
+<ul>
+  {{range .Photos}}
+  <li>
+    <a href="/photo/{{.}}">
+      {{.}}
+    </a>
+  </li>
+  {{ end }}  
+</ul>
+
+</body>
+</html>
