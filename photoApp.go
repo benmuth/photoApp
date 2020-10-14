@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -210,8 +211,6 @@ func (a albumpage) render(w http.ResponseWriter, r *sql.Rows) error {
 }
 
 func (p photopage) render(w http.ResponseWriter) error {
-	// get photoId from http request instead of db query?
-	p.PhotoID = 1
 	return templates.ExecuteTemplate(w, "photo.html", p)
 }
 
@@ -239,9 +238,12 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
+var validPath = regexp.MustCompile("^/(home|album|photo)/([a-zA-Z0-9]+)$")
+
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	p := photopage{}
-	// get photoId from http request instead of db query?
+	m := validPath.FindStringSubmatch(r.URL.Path)
+	p.PhotoID = m[2]
 	err := p.render(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
