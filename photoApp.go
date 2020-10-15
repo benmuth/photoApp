@@ -19,8 +19,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -92,6 +94,12 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 	return hasPerm
 }
 
+type photoInfo struct {
+	format string
+}
+
+//var photoInfos map[int64]photoInfo
+
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
 func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
 	var photoID int64
@@ -101,6 +109,12 @@ func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
 
 		photoID, err = res.LastInsertId()
 		check(err)
+		if strings.HasSuffix(photoPath, ".jpg") {
+			photoInfos[photoID] = photoInfo{format: "jpg"}
+		}
+		if strings.HasSuffix(photoPath, ".png") {
+			photoInfos[photoID] = photoInfo{format: "png"}
+		}
 		photoData, err := ioutil.ReadFile(photoPath)
 		check(err)
 		err = ioutil.WriteFile("Photos/"+strconv.FormatInt(photoID, 10), photoData, 00007)
@@ -168,6 +182,7 @@ type albumpage struct {
 
 type photopage struct {
 	PhotoID int64
+	Format  string
 }
 
 func (h homepage) query() string {
@@ -243,8 +258,11 @@ var validPath = regexp.MustCompile("^/(home|album|photo)/([a-zA-Z0-9]+)$")
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
-	p.PhotoID = m[2]
-	err := p.render(w)
+	var err error
+	p.PhotoID, err = strconv.ParseInt(m[2], 10, 64)
+	check(err)
+	p.Format = photoInfos[p.PhotoID].format
+	err = p.render(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -263,7 +281,33 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.Hand
 	}
 }
 
+// dummy photoInfos until add function is used
+var photoInfos = map[int64]photoInfo{
+	1: photoInfo{format: "jpg"},
+	2: photoInfo{format: "png"},
+}
+
 func main() {
+	/*f, err := os.Open("/Users/moose1/Documents/photoApp/Photos/1.jpg")
+	defer f.Close()
+	if err != nil {
+		fmt.Printf("ERR: open file didn't work\n")
+	} else {
+		fmt.Printf("PASS\n")
+	}*/
+	d, err := os.Open("/Users/moose1/Documents/photoApp/Photos/")
+	defer d.Close()
+	if err != nil {
+		fmt.Printf("ERR: directory didn't open\n")
+	} else {
+		fmt.Printf("PASS\n")
+	}
+	filenames, err := d.Readdirnames(0)
+	if err != nil {
+		fmt.Printf("ERR: couldn't read file names\n")
+	} else {
+		fmt.Printf("%+s", filenames)
+	}
 	http.HandleFunc("/home/", makeHandler(homeHandler))
 	http.HandleFunc("/album/", makeHandler(albumHandler))
 	http.HandleFunc("/photo/", makeHandler(photoHandler))
