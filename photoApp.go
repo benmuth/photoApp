@@ -16,20 +16,20 @@ import (
 	"html/template"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
 	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
-	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id));\n" +
+	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id), path TEXT UNIQUE);\n" +
 	"INSERT INTO users (email) VALUES ('user1@example.com');\n" +
 	"INSERT INTO users (email) VALUES ('user2@example.com');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1 main');\n" +
@@ -94,12 +94,6 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 	return hasPerm
 }
 
-type photoInfo struct {
-	format string
-}
-
-//var photoInfos map[int64]photoInfo
-
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
 func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
 	var photoID int64
@@ -109,12 +103,6 @@ func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
 
 		photoID, err = res.LastInsertId()
 		check(err)
-		if strings.HasSuffix(photoPath, ".jpg") {
-			photoInfos[photoID] = photoInfo{format: "jpg"}
-		}
-		if strings.HasSuffix(photoPath, ".png") {
-			photoInfos[photoID] = photoInfo{format: "png"}
-		}
 		photoData, err := ioutil.ReadFile(photoPath)
 		check(err)
 		err = ioutil.WriteFile("Photos/"+strconv.FormatInt(photoID, 10), photoData, 00007)
@@ -182,7 +170,6 @@ type albumpage struct {
 
 type photopage struct {
 	PhotoID int64
-	Format  string
 }
 
 func (h homepage) query() string {
@@ -253,19 +240,32 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(home|album|photo)/([a-zA-Z0-9]+)$")
+var validPath = regexp.MustCompile("^/(home|album|photo|photos)/([a-zA-Z0-9]+)$")
 
+// serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	var err error
 	p.PhotoID, err = strconv.ParseInt(m[2], 10, 64)
 	check(err)
-	p.Format = photoInfos[p.PhotoID].format
 	err = p.render(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
+func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	m := validPath.FindStringSubmatch(r.URL.Path)
+	id := m[2]
+	// TODO: map from photo id to path on disk via the database
+	// refactor: remove your photoInfo
+	// call me for the add function
+	f, err := os.Open(fmt.Sprintf("/Users/moose1/Documents/photoApp/Photos/%s.jpg", id))
+	check(err)
+	_, err = io.Copy(w, f)
+	check(err)
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
@@ -281,12 +281,6 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.Hand
 	}
 }
 
-// dummy photoInfos until add function is used
-var photoInfos = map[int64]photoInfo{
-	1: photoInfo{format: "jpg"},
-	2: photoInfo{format: "png"},
-}
-
 func main() {
 	/*f, err := os.Open("/Users/moose1/Documents/photoApp/Photos/1.jpg")
 	defer f.Close()
@@ -295,21 +289,24 @@ func main() {
 	} else {
 		fmt.Printf("PASS\n")
 	}*/
-	d, err := os.Open("/Users/moose1/Documents/photoApp/Photos/")
-	defer d.Close()
-	if err != nil {
-		fmt.Printf("ERR: directory didn't open\n")
-	} else {
-		fmt.Printf("PASS\n")
-	}
-	filenames, err := d.Readdirnames(0)
-	if err != nil {
-		fmt.Printf("ERR: couldn't read file names\n")
-	} else {
-		fmt.Printf("%+s", filenames)
-	}
+	/*
+		d, err := os.Open("/Users/moose1/Documents/photoApp/Photos/")
+		defer d.Close()
+		if err != nil {
+			fmt.Printf("ERR: directory didn't open\n")
+		} else {
+			fmt.Printf("PASS\n")
+		}
+		filenames, err := d.Readdirnames(0)
+		if err != nil {
+			fmt.Printf("ERR: couldn't read file names\n")
+		} else {
+			fmt.Printf("%+s", filenames)
+		}
+	*/
 	http.HandleFunc("/home/", makeHandler(homeHandler))
 	http.HandleFunc("/album/", makeHandler(albumHandler))
 	http.HandleFunc("/photo/", makeHandler(photoHandler))
+	http.HandleFunc("/photos/", makeHandler(photosHandler))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
