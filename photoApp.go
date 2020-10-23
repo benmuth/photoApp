@@ -289,12 +289,16 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if len(fh) > 1 {
 		log.Fatalf("ERR: too many file headers in multipart form\n")
 	}
-	f, err := fh[0].Open()
+	mpf, err := fh[0].Open()
 	check(err)
-
+	var i interface{} = mpf //type assertion to match multipart.file type to os.file type
+	f := i.(os.File)
 	m := validPath.FindStringSubmatch(r.URL.Path)
+	albumID, err := strconv.ParseInt(m[1], 10, 64)
+	check(err)
 	//TODO: Get userID from site token or cookie
-	photoID := addPhoto(m[1], 1, f, db)
+	photoID := addPhoto(albumID, 1, &f, db)
+	http.Redirect(w, r, "/photo/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
