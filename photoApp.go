@@ -279,6 +279,15 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	err := r.ParseMultipartForm(1000000)
+	check(err)
+	imageInput := r.MultipartForm.File
+	fh := imageInput["imageInput"]
+	if len(fh) > 1 {
+		log.Fatalf("ERR: too many file headers in multipart form\n")
+	}
+	f, err := fh[0].Open()
+	check(err)
 
 }
 
