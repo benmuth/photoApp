@@ -35,8 +35,8 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 	"INSERT INTO albums (user_id, name) VALUES (1, '1 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (2, '2 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1s Birthday!');\n" +
-	"INSERT INTO photos (album_id, user_id) VALUES (1, 1);\n" +
-	"INSERT INTO photos (album_id, user_id) VALUES (1, 1);\n" +
+	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/1.jpg');\n" +
+	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
 	"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n"
 
@@ -164,12 +164,14 @@ type homepage struct {
 }
 
 type albumpage struct {
-	AlbumID int64
-	Photos  []int64
+	AlbumID    int64
+	Photos     []int64
+	PhotoPaths []string
 }
 
 type photopage struct {
 	PhotoID int64
+	Path    string
 }
 
 func (h homepage) query() string {
@@ -246,9 +248,16 @@ var validPath = regexp.MustCompile("^/(home|album|photo|photos)/([a-zA-Z0-9]+)$"
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
+
 	var err error
-	p.PhotoID, err = strconv.ParseInt(m[2], 10, 64)
+	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
+	p.PhotoID = id
+	/*
+		var path string
+		err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
+		p.Path = path
+	*/
 	err = p.render(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -258,14 +267,19 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
 func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	m := validPath.FindStringSubmatch(r.URL.Path)
-	id := m[2]
-	// TODO: map from photo id to path on disk via the database
-	// refactor: remove your photoInfo
-	// call me for the add function
-	f, err := os.Open(fmt.Sprintf("/Users/moose1/Documents/photoApp/Photos/%s.jpg", id))
+	id, err := strconv.ParseInt(m[2], 10, 64)
+	check(err)
+	var path string
+	err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
+	check(err)
+	f, err := os.Open(path)
 	check(err)
 	_, err = io.Copy(w, f)
 	check(err)
+}
+
+func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
@@ -308,5 +322,6 @@ func main() {
 	http.HandleFunc("/album/", makeHandler(albumHandler))
 	http.HandleFunc("/photo/", makeHandler(photoHandler))
 	http.HandleFunc("/photos/", makeHandler(photosHandler))
+	http.HandleFunc("/upload/", makeHandler(uploadHandler))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
