@@ -95,7 +95,7 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
+func addPhoto(albumID int64, userID int64, f *os.File, db *sql.DB) int64 {
 	var photoID int64
 	if checkPerm(albumID, userID, db) == true {
 		res, err := db.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
@@ -103,8 +103,11 @@ func addPhoto(albumID int64, userID int64, photoPath string, db *sql.DB) int64 {
 
 		photoID, err = res.LastInsertId()
 		check(err)
-		photoData, err := ioutil.ReadFile(photoPath)
-		check(err)
+		//photoData, err := ioutil.ReadFile(photoPath)
+		//check(err)
+		fi, err := f.Stat()
+		photoData := make([]byte, fi.Size())
+		_, err = f.Read(photoData)
 		err = ioutil.WriteFile("Photos/"+strconv.FormatInt(photoID, 10), photoData, 00007)
 		check(err)
 	} else {
@@ -289,6 +292,9 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	f, err := fh[0].Open()
 	check(err)
 
+	m := validPath.FindStringSubmatch(r.URL.Path)
+	//TODO: Get userID from site token or cookie
+	photoID := addPhoto(m[1], 1, f, db)
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
@@ -331,6 +337,6 @@ func main() {
 	http.HandleFunc("/album/", makeHandler(albumHandler))
 	http.HandleFunc("/photo/", makeHandler(photoHandler))
 	http.HandleFunc("/photos/", makeHandler(photosHandler))
-	http.HandleFunc("/upload/", makeHandler(uploadHandler))
+	http.HandleFunc("/album/upload", makeHandler(uploadHandler))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
