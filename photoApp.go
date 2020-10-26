@@ -17,7 +17,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -30,18 +29,22 @@ import (
 const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
 	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
 	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id), path TEXT UNIQUE);\n" +
+	"CREATE TABLE album_permissions (album_id INTEGER REFERENCES albums(id), user_id INTEGER REFERENCES users(id));\n" +
 	"INSERT INTO users (email) VALUES ('user1@example.com');\n" +
 	"INSERT INTO users (email) VALUES ('user2@example.com');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (2, '2 main');\n" +
 	"INSERT INTO albums (user_id, name) VALUES (1, '1s Birthday!');\n" +
+	"INSERT INTO album_permissions (album_id, user_id) VALUES (1,1);\n" +
+	"INSERT INTO album_permissions (album_id, user_id) VALUES (1,2);\n" +
+	"INSERT INTO album_permissions (album_id, user_id) VALUES (2,2);\n" +
 	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/1.jpg');\n" +
-	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n" +
-	"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
-	"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n"
+	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n" //+
+	//"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
+	//"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n"
 
 // these functions are to be used with a database that includes following tables (! = primary key):
-// users: id!|email		albums: id!|userid|name	     photos: id!|albumid|userid		album_permissions: albumid|userid	tags: photo_id|tagged_id
+// users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
 
 func check(e error) {
 	if e != nil {
@@ -95,25 +98,39 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, f *os.File, db *sql.DB) int64 {
+func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string) {
 	var photoID int64
+	var path string
 	if checkPerm(albumID, userID, db) == true {
 		res, err := db.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
 		check(err)
 
 		photoID, err = res.LastInsertId()
 		check(err)
-		//photoData, err := ioutil.ReadFile(photoPath)
-		//check(err)
-		fi, err := f.Stat()
-		photoData := make([]byte, fi.Size())
-		_, err = f.Read(photoData)
-		err = ioutil.WriteFile("Photos/"+strconv.FormatInt(photoID, 10), photoData, 00007)
+		path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
+		_, err = db.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
 		check(err)
+
+		allRows, err := db.Query("SELECT * FROM photos")
+		check(err)
+		table := make([]string, 15)
+		for i := 0; allRows.Next(); i = i + 5 {
+			err := allRows.Scan(&table[i], &table[i+1], &table[i+2], &table[i+3])
+			check(err)
+		}
+		fmt.Printf("TABLE: \n")
+		for i := 0; i < len(table); i++ {
+			if table[i] == "" {
+				fmt.Printf("\n")
+			} else {
+				fmt.Printf("%s ", table[i])
+			}
+		}
+
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
 	}
-	return photoID
+	return photoID, path
 	//add a tag feature to this function?
 }
 
@@ -224,6 +241,7 @@ func (p photopage) render(w http.ResponseWriter) error {
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	h := homepage{}
 	result, err := db.Query(h.query())
+	defer result.Close()
 	if err != nil {
 		log.Panic("ERROR: invalid user id\n")
 	}
@@ -236,6 +254,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	a := albumpage{}
 	result, err := db.Query(a.query())
+	defer result.Close()
 	if err != nil {
 		log.Panic("ERROR: invalid album\n")
 	}
@@ -245,7 +264,7 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(home|album|photo|photos)/([a-zA-Z0-9]+)$")
+var validPath = regexp.MustCompile("^/(home|album|photo|photos|upload)/([a-zA-Z0-9]+)$")
 
 // serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -272,9 +291,28 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
+
+	allRows, err := db.Query("SELECT * FROM photos")
+	check(err)
+	table := make([]string, 15)
+	for i := 0; allRows.Next(); i = i + 5 {
+		err := allRows.Scan(&table[i], &table[i+1], &table[i+2], &table[i+3])
+		check(err)
+	}
+	fmt.Printf("TABLE: \n")
+	for i := 0; i < len(table); i++ {
+		if table[i] == "" {
+			fmt.Printf("\n")
+		} else {
+			fmt.Printf("%s ", table[i])
+		}
+	}
+
 	var path string
 	err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
-	check(err)
+	if err != nil {
+		log.Fatalf("path query err \n")
+	}
 	f, err := os.Open(path)
 	check(err)
 	_, err = io.Copy(w, f)
@@ -285,20 +323,27 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	err := r.ParseMultipartForm(1000000)
 	check(err)
 	imageInput := r.MultipartForm.File
-	fh := imageInput["imageInput"]
-	if len(fh) > 1 {
-		log.Fatalf("ERR: too many file headers in multipart form\n")
+	fh := imageInput["photo"]
+	if len(fh) < 1 {
+		log.Fatalf("ERR: no file uploaded")
+	} else if len(fh) > 1 {
+		log.Fatalf("ERR: too many files uploaded\n")
 	}
 	mpf, err := fh[0].Open()
 	check(err)
-	var i interface{} = mpf //type assertion to match multipart.file type to os.file type
-	f := i.(os.File)
+	image := make([]byte, 1000000)
+	_, err = mpf.Read(image)
 	m := validPath.FindStringSubmatch(r.URL.Path)
-	albumID, err := strconv.ParseInt(m[1], 10, 64)
+	albumID, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	//TODO: Get userID from site token or cookie
-	photoID := addPhoto(albumID, 1, &f, db)
-	http.Redirect(w, r, "/photo/"+strconv.FormatInt(photoID, 10), http.StatusFound)
+	photoID, path := addPhoto(albumID, 1, db)
+	fmt.Printf("new photo path: %s\n", path)
+	f, err := os.Create(path)
+	check(err)
+	_, err = io.Copy(f, mpf)
+	check(err)
+	http.Redirect(w, r, "/photos/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
@@ -337,10 +382,12 @@ func main() {
 			fmt.Printf("%+s", filenames)
 		}
 	*/
+	log.SetFlags(log.Lshortfile)
 	http.HandleFunc("/home/", makeHandler(homeHandler))
 	http.HandleFunc("/album/", makeHandler(albumHandler))
 	http.HandleFunc("/photo/", makeHandler(photoHandler))
 	http.HandleFunc("/photos/", makeHandler(photosHandler))
-	http.HandleFunc("/album/upload", makeHandler(uploadHandler))
+	http.HandleFunc("/upload/", makeHandler(uploadHandler))
+
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
