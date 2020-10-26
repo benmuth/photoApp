@@ -39,9 +39,7 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 	"INSERT INTO album_permissions (album_id, user_id) VALUES (1,2);\n" +
 	"INSERT INTO album_permissions (album_id, user_id) VALUES (2,2);\n" +
 	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/1.jpg');\n" +
-	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n" //+
-	//"INSERT INTO photos (album_id, user_id) VALUES (2, 2);\n" +
-	//"INSERT INTO photos (album_id, user_id) VALUES (3, 1);\n"
+	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n"
 
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
@@ -110,23 +108,6 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string) {
 		path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
 		_, err = db.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
 		check(err)
-
-		allRows, err := db.Query("SELECT * FROM photos")
-		check(err)
-		table := make([]string, 15)
-		for i := 0; allRows.Next(); i = i + 5 {
-			err := allRows.Scan(&table[i], &table[i+1], &table[i+2], &table[i+3])
-			check(err)
-		}
-		fmt.Printf("TABLE: \n")
-		for i := 0; i < len(table); i++ {
-			if table[i] == "" {
-				fmt.Printf("\n")
-			} else {
-				fmt.Printf("%s ", table[i])
-			}
-		}
-
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
 	}
@@ -275,11 +256,7 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	p.PhotoID = id
-	/*
-		var path string
-		err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
-		p.Path = path
-	*/
+
 	err = p.render(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -291,22 +268,6 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
-
-	allRows, err := db.Query("SELECT * FROM photos")
-	check(err)
-	table := make([]string, 15)
-	for i := 0; allRows.Next(); i = i + 5 {
-		err := allRows.Scan(&table[i], &table[i+1], &table[i+2], &table[i+3])
-		check(err)
-	}
-	fmt.Printf("TABLE: \n")
-	for i := 0; i < len(table); i++ {
-		if table[i] == "" {
-			fmt.Printf("\n")
-		} else {
-			fmt.Printf("%s ", table[i])
-		}
-	}
 
 	var path string
 	err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
@@ -329,65 +290,45 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	} else if len(fh) > 1 {
 		log.Fatalf("ERR: too many files uploaded\n")
 	}
+	fmt.Printf("uploaded file size: %v\n", fh[0].Size)
 	mpf, err := fh[0].Open()
+	defer mpf.Close()
 	check(err)
-	image := make([]byte, 1000000)
-	_, err = mpf.Read(image)
+
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	albumID, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	//TODO: Get userID from site token or cookie
 	photoID, path := addPhoto(albumID, 1, db)
-	fmt.Printf("new photo path: %s\n", path)
 	f, err := os.Create(path)
 	check(err)
 	_, err = io.Copy(f, mpf)
 	check(err)
+	info, err := f.Stat()
+	check(err)
+	fmt.Printf("copied file size: %v\n", info.Size())
 	http.Redirect(w, r, "/photos/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB)) http.HandlerFunc {
+func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		db, err := sql.Open("sqlite3", ":memory:")
-		check(err)
-		defer db.Close()
-
-		_, err = db.Exec(dbInit)
-		check(err)
-
 		fn(w, r, db)
 	}
 }
 
 func main() {
-	/*f, err := os.Open("/Users/moose1/Documents/photoApp/Photos/1.jpg")
-	defer f.Close()
-	if err != nil {
-		fmt.Printf("ERR: open file didn't work\n")
-	} else {
-		fmt.Printf("PASS\n")
-	}*/
-	/*
-		d, err := os.Open("/Users/moose1/Documents/photoApp/Photos/")
-		defer d.Close()
-		if err != nil {
-			fmt.Printf("ERR: directory didn't open\n")
-		} else {
-			fmt.Printf("PASS\n")
-		}
-		filenames, err := d.Readdirnames(0)
-		if err != nil {
-			fmt.Printf("ERR: couldn't read file names\n")
-		} else {
-			fmt.Printf("%+s", filenames)
-		}
-	*/
+	db, err := sql.Open("sqlite3", ":memory:")
+	check(err)
+	defer db.Close()
+
+	_, err = db.Exec(dbInit)
+	check(err)
 	log.SetFlags(log.Lshortfile)
-	http.HandleFunc("/home/", makeHandler(homeHandler))
-	http.HandleFunc("/album/", makeHandler(albumHandler))
-	http.HandleFunc("/photo/", makeHandler(photoHandler))
-	http.HandleFunc("/photos/", makeHandler(photosHandler))
-	http.HandleFunc("/upload/", makeHandler(uploadHandler))
+	http.HandleFunc("/home/", makeHandler(homeHandler, db))
+	http.HandleFunc("/album/", makeHandler(albumHandler, db))
+	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
+	http.HandleFunc("/photos/", makeHandler(photosHandler, db))
+	http.HandleFunc("/upload/", makeHandler(uploadHandler, db))
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
