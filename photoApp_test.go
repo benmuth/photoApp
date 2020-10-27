@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"os"
+	"strconv"
 	"testing"
 )
 
@@ -132,20 +134,30 @@ func TestAddPhoto(t *testing.T) {
 		photoPath string
 	}{
 		{
-			name:      "basic insert",
+			name:      "basic add",
 			user:      1,
 			album:     1,
 			photoPath: "/Users/moose1/Documents/reference/Scrampy.jpg",
+		},
+		{
+			name:      "cross user add",
+			user:      2,
+			album:     3,
+			photoPath: "/Users/moose1/Documents/reference/Toph.png",
 		},
 	}
 
 	for _, ex := range examples {
 		t.Run(ex.name, func(t *testing.T) {
 			photoId := addPhoto(ex.album, ex.user, ex.photoPath, db)
+
 			photoRow := db.QueryRow("SELECT user_id FROM photos WHERE id = ?", photoId)
+			var userId int64
 			if err = photoRow.Scan(&userId); err != nil {
 				t.Fatalf("ERR: %s\n", err)
 			}
+
+			err = os.Remove("/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoId, 10))
 		})
 	}
 }

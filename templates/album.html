@@ -5,13 +5,15 @@
   <title>album: {{.AlbumID}}</title>
 </head>
 <h1>album: {{.AlbumID}}</h1>
+<h3><form enctype="multipart/form-data" method="POST" action="/upload/{{.AlbumID}}">
+  <input type="file" accept="image/png" name="photo">
+  <input type="submit">
+  </form></h3>
 <body>
 <ul>
   {{range .Photos}}
   <li>
-    <a href="/photo/{{.}}">
-      {{.}}
-    </a>
+    <a href="/photo/{{.}}"><img src= "/photos/{{.}}" alt="TODO: Photo metadata or tags" style="width: 300px;"></a>
   </li>
   {{ end }}  
 </ul>

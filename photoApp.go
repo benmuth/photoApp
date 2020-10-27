@@ -46,7 +46,7 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 
 func check(e error) {
 	if e != nil {
-		log.Fatal(e)
+		panic(e)
 	}
 }
 
@@ -240,14 +240,18 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	a := albumpage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
-	a.AlbumID = id
 	check(err)
+	a.AlbumID = id
 	fmt.Printf("album query: %s \n", a.query())
 	rows, err := db.Query(a.query())
+	check(err)
 	defer rows.Close()
-	if err != nil {
-		log.Panic("ERROR: invalid album\n")
-	}
+
+	/*
+		if err != nil {
+			log.Fatalf("ERROR: album query\n%e\n", err)
+		}
+	*/
 	err = a.render(w, r, rows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -274,15 +278,26 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
 func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	rows, err := db.Query("SELECT path FROM photos WHERE album_id = 1")
+	check(err)
+	var result string
+	if rows.Next() {
+		err = rows.Scan(&result)
+		check(err)
+	}
+	fmt.Printf(">>>>>>>>>>>>>>>>> query result: %v\n", result)
 	fmt.Printf("Photos path request: % +v\n", r.URL.Path)
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	var path string
 	err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
-	if err != nil {
-		log.Fatalf("path query err \n")
-	}
+	check(err)
+	/*
+		if err != nil {
+			log.Fatalf("ERROR: path query\n %e\n", err)
+		}
+	*/
 	f, err := os.Open(path)
 	check(err)
 	_, err = io.Copy(w, f)
@@ -320,7 +335,9 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
+	log.Printf("DB: %p", db)
 	return func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("DB: %p", db)
 		fn(w, r, db)
 	}
 }
@@ -332,6 +349,16 @@ func main() {
 
 	_, err = db.Exec(dbInit)
 	check(err)
+
+	rows, err := db.Query("SELECT path FROM photos WHERE album_id = 1")
+	check(err)
+	var result string
+	if rows.Next() {
+		err = rows.Scan(&result)
+		check(err)
+	}
+	fmt.Printf("query result: %v\n", result)
+
 	log.SetFlags(log.Lshortfile)
 	http.HandleFunc("/home/", makeHandler(homeHandler, db))
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
