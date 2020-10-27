@@ -156,7 +156,7 @@ var templates = template.Must(template.ParseFiles("templates/home.html", "templa
 
 type page interface {
 	query() string
-	render(w http.ResponseWriter, r sql.Result)
+	render(w http.ResponseWriter, r *http.Request, rows *sql.Rows)
 }
 
 type homepage struct {
@@ -165,68 +165,72 @@ type homepage struct {
 }
 
 type albumpage struct {
-	AlbumID    int64
-	Photos     []int64
-	PhotoPaths []string
+	AlbumID int64
+	Photos  []int64
 }
 
 type photopage struct {
+	AlbumID int64
 	PhotoID int64
 	Path    string
 }
 
 func (h homepage) query() string {
 	//TODO: get user_id from http request header
-	return "SELECT id FROM albums WHERE user_id = 1"
+	return "SELECT id FROM albums WHERE user_id = " + strconv.FormatInt(h.UserID, 10)
 }
 
 func (a albumpage) query() string {
-	return "SELECT id FROM photos WHERE album_id = 1"
-}
-
-// TODO: handle errors instead of panicking
-func (h homepage) render(w http.ResponseWriter, r *sql.Rows) error {
-	albums := make([]int64, 0)
-	for i := 0; r.Next(); i++ {
-		var newElem int64
-		albums = append(albums, newElem)
-		err := r.Scan(&albums[i])
-		if err != nil {
-			return err
-		}
-	}
-	h.Albums = albums
-	h.UserID = 1
-	return templates.ExecuteTemplate(w, "home.html", h)
-}
-
-func (a albumpage) render(w http.ResponseWriter, r *sql.Rows) error {
-	photos := make([]int64, 0)
-	for i := 0; r.Next(); i++ {
-		var newElem int64
-		photos = append(photos, newElem)
-		err := r.Scan(&photos[i])
-		if err != nil {
-			return err
-		}
-	}
-	a.Photos = photos
-	a.AlbumID = 1
-	return templates.ExecuteTemplate(w, "album.html", a)
+	return "SELECT id FROM photos WHERE album_id = " + strconv.FormatInt(a.AlbumID, 10)
 }
 
 func (p photopage) render(w http.ResponseWriter) error {
 	return templates.ExecuteTemplate(w, "photo.html", p)
 }
 
+// TODO: handle errors instead of panicking
+func (h homepage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows) error {
+	albums := make([]int64, 0)
+	for i := 0; rows.Next(); i++ {
+		var newElem int64
+		albums = append(albums, newElem)
+		err := rows.Scan(&albums[i])
+		if err != nil {
+			return err
+		}
+	}
+	h.Albums = albums
+
+	return templates.ExecuteTemplate(w, "home.html", h)
+}
+
+func (a albumpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows) error {
+	photos := make([]int64, 0)
+	for i := 0; rows.Next(); i++ {
+		var newElem int64
+		photos = append(photos, newElem)
+		err := rows.Scan(&photos[i])
+		if err != nil {
+			return err
+		}
+	}
+	a.Photos = photos
+	fmt.Printf("album photos: %v\n", a.Photos)
+	return templates.ExecuteTemplate(w, "album.html", a)
+}
+
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	h := homepage{}
-	result, err := db.Query(h.query())
-	defer result.Close()
+	m := validPath.FindStringSubmatch(r.URL.Path)
+	id, err := strconv.ParseInt(m[2], 10, 64)
+	h.UserID = id
+	check(err)
+	rows, err := db.Query(h.query())
+	defer rows.Close()
 	if err != nil {
 		log.Panic("ERROR: invalid user id\n")
 	}
-	err = h.render(w, result)
+	err = h.render(w, r, rows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -234,12 +238,17 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	a := albumpage{}
-	result, err := db.Query(a.query())
-	defer result.Close()
+	m := validPath.FindStringSubmatch(r.URL.Path)
+	id, err := strconv.ParseInt(m[2], 10, 64)
+	a.AlbumID = id
+	check(err)
+	fmt.Printf("album query: %s \n", a.query())
+	rows, err := db.Query(a.query())
+	defer rows.Close()
 	if err != nil {
 		log.Panic("ERROR: invalid album\n")
 	}
-	err = a.render(w, result)
+	err = a.render(w, r, rows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -265,10 +274,10 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
 func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	fmt.Printf("Photos path request: % +v\n", r.URL.Path)
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
-
 	var path string
 	err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
 	if err != nil {
@@ -307,7 +316,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	info, err := f.Stat()
 	check(err)
 	fmt.Printf("copied file size: %v\n", info.Size())
-	http.Redirect(w, r, "/photos/"+strconv.FormatInt(photoID, 10), http.StatusFound)
+	http.Redirect(w, r, "/photo/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
@@ -328,7 +337,7 @@ func main() {
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
 	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
 	http.HandleFunc("/photos/", makeHandler(photosHandler, db))
-	http.HandleFunc("/upload/", makeHandler(uploadHandler, db))
+	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
