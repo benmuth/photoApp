@@ -20,8 +20,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
+	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -41,6 +43,11 @@ const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\
 	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/1.jpg');\n" +
 	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n"
 
+const dbClear = "DROP TABLE album_permissions;\n" +
+	"DROP TABLE photos;\n" +
+	"DROP TABLE albums;\n" +
+	"DROP TABLE users;\n"
+
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
 
@@ -50,33 +57,43 @@ func check(e error) {
 	}
 }
 
-// create a new user along with an initial album
-func newUser(email string, db *sql.DB) {
-	r, err := db.Exec("insert into users (email) values (?)", email)
-	check(err)
+type syncDB struct {
+	Db *sql.DB
+	Mu sync.Mutex
+}
 
+// create a new user along with an initial album
+func newUser(email string, db *syncDB) {
+	db.Mu.Lock()
+	r, err := db.Db.Exec("insert into users (email) values (?)", email)
+	check(err)
 	userID, err := r.LastInsertId()
 	check(err)
 	mainAlbum := fmt.Sprintf("%s's Photos", email)
-	r, err = db.Exec("insert into albums (user_id, name) values (?, ?)", userID, mainAlbum)
+	r, err = db.Db.Exec("insert into albums (user_id, name) values (?, ?)", userID, mainAlbum)
 	check(err)
+	db.Mu.Unlock()
 	albumID, err := r.LastInsertId()
 	check(err)
 	givePerm(albumID, userID, db)
 }
 
-func newAlbum(name string, userID int64, db *sql.DB) {
-	r, err := db.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
+func newAlbum(name string, userID int64, db *syncDB) {
+	db.Mu.Lock()
+	r, err := db.Db.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
 	check(err)
+	db.Mu.Unlock()
 	albumID, err := r.LastInsertId()
 	check(err)
 	givePerm(albumID, userID, db)
 }
 
 // checks if the given user has permission to access the given album
-func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
+func checkPerm(albumID int64, userID int64, db *syncDB) bool {
 	//retrieve all albums that a user has access to
-	permittedAlbumRows, err := db.Query("select album_id from album_permissions where user_id = ? and album_id = ?", userID, albumID)
+	db.Mu.Lock()
+	permittedAlbumRows, err := db.Db.Query("select album_id from album_permissions where user_id = ? and album_id = ?", userID, albumID)
+	db.Mu.Unlock()
 	defer permittedAlbumRows.Close()
 	check(err)
 	// copy all album ids that the specified user has access to into a slice
@@ -96,17 +113,18 @@ func checkPerm(albumID int64, userID int64, db *sql.DB) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string) {
+func addPhoto(albumID int64, userID int64, db *syncDB) (int64, string) {
 	var photoID int64
 	var path string
 	if checkPerm(albumID, userID, db) == true {
-		res, err := db.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
+		db.Mu.Lock()
+		res, err := db.Db.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
 		check(err)
-
 		photoID, err = res.LastInsertId()
 		check(err)
 		path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
-		_, err = db.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
+		_, err = db.Db.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
+		db.Mu.Unlock()
 		check(err)
 	} else {
 		fmt.Printf("That user doesn't have permission to access the album!\n")
@@ -116,20 +134,23 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string) {
 }
 
 // give a user permission to view and add photos to an album
-func givePerm(albumID int64, userID int64, db *sql.DB) {
+func givePerm(albumID int64, userID int64, db *syncDB) {
 	if checkPerm(albumID, userID, db) == false {
-		_, err := db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
+		db.Mu.Lock()
+		_, err := db.Db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
 		check(err)
+		db.Mu.Unlock()
 	} else {
 		fmt.Printf("That user already has permission to access the album!\n")
 	}
 }
 
-func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
-	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
+func showTags(userID int64, db *syncDB) ([]int64, []int64) {
+	db.Mu.Lock()
+	taggedPhotoRows, err := db.Db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedPhotoRows.Close()
 	check(err)
-
+	db.Mu.Unlock()
 	taggedPhotos := make([]int64, 0)
 	for i := 0; taggedPhotoRows.Next(); i++ {
 		var newElem int64
@@ -137,11 +158,11 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
 		err := taggedPhotoRows.Scan(&taggedPhotos[i])
 		check(err)
 	}
-
-	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
+	db.Mu.Lock()
+	taggedAlbumRows, err := db.Db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedAlbumRows.Close()
 	check(err)
-
+	db.Mu.Unlock()
 	taggedAlbums := make([]int64, 0)
 	for i := 0; taggedAlbumRows.Next(); i++ {
 		var newElem int64
@@ -219,13 +240,14 @@ func (a albumpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows
 	return templates.ExecuteTemplate(w, "album.html", a)
 }
 
-func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func homeHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	h := homepage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
-	h.UserID = id
 	check(err)
-	rows, err := db.Query(h.query())
+	h.UserID = id
+
+	rows, err := db.Db.Query(h.query())
 	defer rows.Close()
 	if err != nil {
 		log.Panic("ERROR: invalid user id\n")
@@ -236,15 +258,17 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func albumHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	a := albumpage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	a.AlbumID = id
 	fmt.Printf("album query: %s \n", a.query())
-	rows, err := db.Query(a.query())
+	db.Mu.Lock()
+	rows, err := db.Db.Query(a.query())
 	check(err)
+	db.Mu.Unlock()
 	defer rows.Close()
 
 	/*
@@ -261,7 +285,7 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 var validPath = regexp.MustCompile("^/(home|album|photo|photos|upload)/([a-zA-Z0-9]+)$")
 
 // serves HTML
-func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func photoHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 
@@ -277,9 +301,11 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
-func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.Query("SELECT path FROM photos WHERE album_id = 1")
+func photosHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
+	db.Mu.Lock()
+	rows, err := db.Db.Query("SELECT path FROM photos WHERE album_id = 1")
 	check(err)
+	db.Mu.Unlock()
 	var result string
 	if rows.Next() {
 		err = rows.Scan(&result)
@@ -291,8 +317,10 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	var path string
-	err = db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
+	db.Mu.Lock()
+	err = db.Db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
 	check(err)
+	db.Mu.Unlock()
 	/*
 		if err != nil {
 			log.Fatalf("ERROR: path query\n %e\n", err)
@@ -304,7 +332,7 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	check(err)
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	err := r.ParseMultipartForm(1000000)
 	check(err)
 	imageInput := r.MultipartForm.File
@@ -323,6 +351,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	albumID, err := strconv.ParseInt(m[2], 10, 64)
 	check(err)
 	//TODO: Get userID from site token or cookie
+
 	photoID, path := addPhoto(albumID, 1, db)
 	f, err := os.Create(path)
 	check(err)
@@ -334,24 +363,48 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	http.Redirect(w, r, "/photo/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
-	log.Printf("DB: %p", db)
+func makeHandler(fn func(http.ResponseWriter, *http.Request, *syncDB), db *syncDB) http.HandlerFunc {
+	log.Printf("DB: %p", db.Db)
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("DB: %p", db)
+		log.Printf("DB: %p", db.Db)
 		fn(w, r, db)
 	}
 }
 
 func main() {
-	db, err := sql.Open("sqlite3", ":memory:")
+	diskDB, err := sql.Open("sqlite3", "/Users/moose1/Downloads/sqlite-amalgamation-3320200/photoAppDB")
 	check(err)
-	defer db.Close()
+	defer diskDB.Close()
+	var mu sync.Mutex
+	db := &syncDB{Db: diskDB, Mu: mu}
 
-	_, err = db.Exec(dbInit)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for sig := range c {
+			fmt.Printf("Signal: %s\n", sig)
+			db.Mu.Lock()
+			db.Db.Exec(dbClear)
+			db.Db.Close()
+			db.Mu.Unlock()
+			os.Exit(1)
+		}
+	}()
+
+	db.Mu.Lock()
+	_, err = db.Db.Exec(dbInit)
+	check(err)
+	db.Mu.Unlock()
+	defer func() {
+		db.Mu.Lock()
+		_, err = db.Db.Exec(dbClear)
+		check(err)
+		db.Mu.Unlock()
+	}()
+
+	rows, err := db.Db.Query("SELECT path FROM photos WHERE album_id = 1")
 	check(err)
 
-	rows, err := db.Query("SELECT path FROM photos WHERE album_id = 1")
-	check(err)
 	var result string
 	if rows.Next() {
 		err = rows.Scan(&result)
@@ -367,4 +420,5 @@ func main() {
 	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
+
 }
