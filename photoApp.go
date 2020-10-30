@@ -372,11 +372,14 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *syncDB), db *syncD
 }
 
 func main() {
-	diskDB, err := sql.Open("sqlite3", "/Users/moose1/Downloads/sqlite-amalgamation-3320200/photoAppDB")
-	check(err)
+	log.SetFlags(log.Lshortfile)
+	dbPath := "/Users/moose1/Documents/photoApp/photoAppDB"
+	diskDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Printf("failed to open database: %s\n", dbPath)
+	}
 	defer diskDB.Close()
-	var mu sync.Mutex
-	db := &syncDB{Db: diskDB, Mu: mu}
+	db := &syncDB{Db: diskDB}
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
