@@ -382,12 +382,17 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for sig := range c {
-			fmt.Printf("Signal: %s\n", sig)
+			fmt.Printf("---Signal: %s\n", sig)
 			db.Mu.Lock()
 			db.Db.Exec(dbClear)
 			db.Db.Close()
 			db.Mu.Unlock()
-			os.Exit(1)
+			signal.Reset(sig)
+			pid := os.Getpid()
+			p, err := os.FindProcess(pid)
+			check(err)
+			err = p.Signal(os.Interrupt)
+			check(err)
 		}
 	}()
 
@@ -419,6 +424,13 @@ func main() {
 	http.HandleFunc("/photos/", makeHandler(photosHandler, db))
 	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
-
+	err = http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Print(err)
+		db.Mu.Lock()
+		_, err = db.Db.Exec(dbClear)
+		db.Mu.Unlock()
+		check(err)
+		os.Exit(0)
+	}
 }
