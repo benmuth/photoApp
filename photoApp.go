@@ -372,6 +372,7 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *syncDB), db *syncD
 }
 
 func main() {
+	fmt.Println("working")
 	log.SetFlags(log.Lshortfile)
 	dbPath := "/Users/moose1/Documents/photoApp/photoAppDB"
 	diskDB, err := sql.Open("sqlite3", dbPath)
@@ -387,12 +388,13 @@ func main() {
 		for sig := range c {
 			fmt.Printf("---Signal: %s\n", sig)
 			db.Mu.Lock()
-			db.Db.Exec(dbClear)
-			db.Db.Close()
+			_, err := db.Db.Exec(dbClear)
+			if err != nil {
+				log.Printf("failed to clear database: %s\n", err)
+			}
 			db.Mu.Unlock()
 			signal.Reset(sig)
-			pid := os.Getpid()
-			p, err := os.FindProcess(pid)
+			p, err := os.FindProcess(os.Getpid())
 			check(err)
 			err = p.Signal(os.Interrupt)
 			check(err)
@@ -409,7 +411,6 @@ func main() {
 		check(err)
 		db.Mu.Unlock()
 	}()
-
 	rows, err := db.Db.Query("SELECT path FROM photos WHERE album_id = 1")
 	check(err)
 
@@ -420,20 +421,11 @@ func main() {
 	}
 	fmt.Printf("query result: %v\n", result)
 
-	log.SetFlags(log.Lshortfile)
 	http.HandleFunc("/home/", makeHandler(homeHandler, db))
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
 	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
 	http.HandleFunc("/photos/", makeHandler(photosHandler, db))
 	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
 
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		fmt.Print(err)
-		db.Mu.Lock()
-		_, err = db.Db.Exec(dbClear)
-		db.Mu.Unlock()
-		check(err)
-		os.Exit(0)
-	}
+	log.Println(http.ListenAndServe(":8080", nil))
 }
