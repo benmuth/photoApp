@@ -16,14 +16,19 @@ func main() {
 		return
 	}
 
-	_, err = db.Exec("insert into ex (value) values (2)")
+	_, err = db.Exec("create table foo (value int)")
+	if err != nil {
+		log.Printf("failed to create table: %s", err)
+	}
+
+	_, err = db.Exec("insert into foo (value) values (2)")
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_, err := db.Exec("insert into ex (value) values (1)")
+		_, err := db.Exec("insert into foo (value) values (1)")
 		if err != nil {
 			log.Printf("failed to insert into db: %s", err)
 		}
-		_, err = db.Query("select * from ex")
+		_, err = db.Query("select * from foo")
 		if err != nil {
 			log.Printf("failed to query db: %s", err)
 		}
