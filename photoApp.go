@@ -21,7 +21,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
 	"regexp"
 	"strconv"
 	"sync"
@@ -29,6 +28,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+/*
 const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
 	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
 	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id), path TEXT UNIQUE);\n" +
@@ -48,6 +48,7 @@ const dbClear = "DROP TABLE album_permissions;\n" +
 	"DROP TABLE photos;\n" +
 	"DROP TABLE albums;\n" +
 	"DROP TABLE users;\n"
+*/
 
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
@@ -374,24 +375,25 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 
 	photoID, path, err := addPhoto(albumID, 1, db)
 	if err != nil {
+		log.Printf("failed to add photo to database: %s", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
-
+		return
 	}
 	f, err := os.Create(path)
 	if err != nil {
-		log.Printf("failed to create file with path %s: %w", path, err)
+		log.Printf("failed to create file with path %s: %s", path, err)
 		http.Redirect(w, r, "/album/"+strconv.FormatInt(albumID, 10), http.StatusInternalServerError)
 		return
 	}
 	_, err = io.Copy(f, mpf)
 	if err != nil {
-		log.Printf("failed to copy data from multipart file to photo file: %w", err)
+		log.Printf("failed to copy data from multipart file to photo file: %s", err)
 		http.Redirect(w, r, "/album/"+strconv.FormatInt(albumID, 10), http.StatusInternalServerError)
 		return
 	}
 	info, err := f.Stat()
 	if err != nil {
-		log.Printf("failed to get information about the created file: %w", err)
+		log.Printf("failed to get information about the created file: %s", err)
 		http.Redirect(w, r, "/album/"+strconv.FormatInt(albumID, 10), http.StatusInternalServerError)
 		return
 	}
@@ -418,36 +420,38 @@ func main() {
 	defer diskDB.Close()
 	db := &syncDB{Db: diskDB}
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	go func() {
-		for sig := range c {
-			fmt.Printf("---Signal: %s\n", sig)
-			db.Mu.Lock()
-			_, err := db.Db.Exec(dbClear)
-			db.Mu.Unlock()
-			if err != nil {
-				log.Printf("failed to clear database: %s\n", err)
+	/*
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		go func() {
+			for sig := range c {
+				fmt.Printf("---Signal: %s\n", sig)
+				db.Mu.Lock()
+				_, err := db.Db.Exec(dbClear)
+				db.Mu.Unlock()
+				if err != nil {
+					log.Printf("failed to clear database: %s\n", err)
+				}
+				os.Exit(1)
 			}
-			os.Exit(1)
-		}
-	}()
-	func() {
-		db.Mu.Lock()
-		defer db.Mu.Unlock()
-		_, err = db.Db.Exec(dbInit)
-		if err != nil {
-			log.Print("failed to initialize database: %s")
-			panic(err)
-		}
-	}()
-	defer func() {
-		fmt.Println("Clearing should be working!")
-		db.Mu.Lock()
-		defer db.Mu.Unlock()
-		_, err = db.Db.Exec(dbClear)
-		log.Printf("failed to clear database: %s", err)
-	}()
+		}()
+		func() {
+			db.Mu.Lock()
+			defer db.Mu.Unlock()
+			_, err = db.Db.Exec(dbInit)
+			if err != nil {
+				log.Print("failed to initialize database: %s")
+				panic(err)
+			}
+		}()
+		defer func() {
+			fmt.Println("Clearing should be working!")
+			db.Mu.Lock()
+			defer db.Mu.Unlock()
+			_, err = db.Db.Exec(dbClear)
+			log.Printf("failed to clear database: %s", err)
+		}()
+	*/
 
 	http.HandleFunc("/home/", makeHandler(homeHandler, db))
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
