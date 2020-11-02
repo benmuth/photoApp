@@ -378,11 +378,23 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 
 	}
 	f, err := os.Create(path)
-	check(err)
+	if err != nil {
+		log.Printf("failed to create file with path %s: %w", path, err)
+		http.Redirect(w, r, "/album/"+strconv.FormatInt(albumID, 10), http.StatusInternalServerError)
+		return
+	}
 	_, err = io.Copy(f, mpf)
-	check(err)
+	if err != nil {
+		log.Printf("failed to copy data from multipart file to photo file: %w", err)
+		http.Redirect(w, r, "/album/"+strconv.FormatInt(albumID, 10), http.StatusInternalServerError)
+		return
+	}
 	info, err := f.Stat()
-	check(err)
+	if err != nil {
+		log.Printf("failed to get information about the created file: %w", err)
+		http.Redirect(w, r, "/album/"+strconv.FormatInt(albumID, 10), http.StatusInternalServerError)
+		return
+	}
 	fmt.Printf("copied file size: %v\n", info.Size())
 	http.Redirect(w, r, "/photo/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
