@@ -11,6 +11,7 @@ type photoInfo struct {
 */
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"html/template"
@@ -63,37 +64,51 @@ type syncDB struct {
 }
 
 // create a new user along with an initial album
-func newUser(email string, db *syncDB) {
-	db.Mu.Lock()
-	r, err := db.Db.Exec("insert into users (email) values (?)", email)
-	check(err)
+func newUser(email string, tx *sql.Tx) error {
+	r, err := tx.Exec("insert into users (email) values (?)", email)
+	if err != nil {
+		return fmt.Errorf("failed to add users: %w", err)
+	}
 	userID, err := r.LastInsertId()
-	check(err)
+	if err != nil {
+		return fmt.Errorf("failed to get new user id: %w", err)
+	}
 	mainAlbum := fmt.Sprintf("%s's Photos", email)
-	r, err = db.Db.Exec("insert into albums (user_id, name) values (?, ?)", userID, mainAlbum)
-	check(err)
-	db.Mu.Unlock()
+	r, err = tx.Exec("insert into albums (user_id, name) values (?, ?)", userID, mainAlbum)
+	if err != nil {
+		return fmt.Errorf("failed to create user album: %w", err)
+	}
 	albumID, err := r.LastInsertId()
-	check(err)
-	givePerm(albumID, userID, db)
+	if err != nil {
+		return fmt.Errorf("failed to get album id: %w", err)
+	}
+	err = givePerm(albumID, userID, tx)
+	if err != nil {
+		return fmt.Errorf("failed to give user permission to main album: %w", err)
+	}
+	return nil
 }
 
-func newAlbum(name string, userID int64, db *syncDB) {
-	db.Mu.Lock()
-	r, err := db.Db.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
-	check(err)
-	db.Mu.Unlock()
+func newAlbum(name string, userID int64, tx *sql.Tx) error {
+	r, err := tx.Exec("insert into albums (name, user_id) values (?, ?)", name, userID)
+	if err != nil {
+		return fmt.Errorf("failed to create album: %w", err)
+	}
 	albumID, err := r.LastInsertId()
-	check(err)
-	givePerm(albumID, userID, db)
+	if err != nil {
+		return fmt.Errorf("failed to get album id: %w", err)
+	}
+	err = givePerm(albumID, userID, tx)
+	if err != nil {
+		return fmt.Errorf("failed to give user permission to album: %w", err)
+	}
+	return nil
 }
 
 // checks if the given user has permission to access the given album
-func checkPerm(albumID int64, userID int64, db *syncDB) bool {
+func checkPerm(albumID int64, userID int64, tx *sql.Tx) bool {
 	//retrieve all albums that a user has access to
-	db.Mu.Lock()
-	defer db.Mu.Unlock()
-	permittedAlbumRows, err := db.Db.Query("select album_id from album_permissions where user_id = ? and album_id = ?", userID, albumID)
+	permittedAlbumRows, err := tx.Query("select album_id from album_permissions where user_id = ? and album_id = ?", userID, albumID)
 	defer permittedAlbumRows.Close()
 	if err != nil {
 		log.Printf("failed to access album_permissions: %s", err)
@@ -106,37 +121,48 @@ func checkPerm(albumID int64, userID int64, db *syncDB) bool {
 func addPhoto(albumID int64, userID int64, db *syncDB) (int64, string, error) {
 	var photoID int64
 	var path string
-	if checkPerm(albumID, userID, db) == true {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.Db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	if checkPerm(albumID, userID, tx) == true {
 		db.Mu.Lock()
 		defer db.Mu.Unlock()
-		res, err := db.Db.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
+		res, err := tx.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
 		if err != nil {
 			return 0, "", fmt.Errorf("failed to insert photo: %w", err)
 		}
 		photoID, err = res.LastInsertId()
 		check(err)
 		path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
-		_, err = db.Db.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
+		_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
 		if err != nil {
 			return 0, "", fmt.Errorf("failed to add path to photo table: %w", err)
 		}
 	} else {
 		return 0, "", fmt.Errorf("user doesn't have permission to access album")
 	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to commit transaction: %w", err)
+	}
 	return photoID, path, nil
 	//add a tag feature to this function?
 }
 
 // give a user permission to view and add photos to an album
-func givePerm(albumID int64, userID int64, db *syncDB) {
-	if checkPerm(albumID, userID, db) == false {
-		db.Mu.Lock()
-		_, err := db.Db.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
-		check(err)
-		db.Mu.Unlock()
+func givePerm(albumID int64, userID int64, tx *sql.Tx) error {
+	if checkPerm(albumID, userID, tx) == false {
+		_, err := tx.Exec("insert into album_permissions (album_id, user_id) values (?, ?)", albumID, userID)
+		if err != nil {
+			return fmt.Errorf("failed to give permission: %w", err)
+		}
 	} else {
-		fmt.Printf("That user already has permission to access the album!\n")
+		return fmt.Errorf("That user already has permission to access the album!\n")
 	}
+	return nil
 }
 
 func showTags(userID int64, db *syncDB) ([]int64, []int64) {
@@ -348,8 +374,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 
 	photoID, path, err := addPhoto(albumID, 1, db)
 	if err != nil {
-		http.Error(w, err, http.StatusNotFound)
-		panic(err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+
 	}
 	f, err := os.Create(path)
 	check(err)
@@ -398,7 +424,10 @@ func main() {
 		db.Mu.Lock()
 		defer db.Mu.Unlock()
 		_, err = db.Db.Exec(dbInit)
-		log.Fatalf("failed to initialize database: %s", err)
+		if err != nil {
+			log.Print("failed to initialize database: %s")
+			panic(err)
+		}
 	}()
 	defer func() {
 		fmt.Println("Clearing should be working!")
