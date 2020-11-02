@@ -99,19 +99,7 @@ func checkPerm(albumID int64, userID int64, db *syncDB) bool {
 		log.Printf("failed to access album_permissions: %s", err)
 	}
 	// copy all album ids that the specified user has access to into a slice
-	permittedAlbum := make([]int64, 0)
-	for i := 0; permittedAlbumRows.Next(); i++ {
-		var newElem int64
-		permittedAlbum = append(permittedAlbum, newElem)
-		err = permittedAlbumRows.Scan(&permittedAlbum[i])
-		check(err)
-		//i++
-	}
-	var hasPerm bool
-	if len(permittedAlbum) > 0 {
-		hasPerm = true
-	}
-	return hasPerm
+	return permittedAlbumRows.Next()
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
