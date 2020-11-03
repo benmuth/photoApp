@@ -23,32 +23,9 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 )
-
-/*
-const dbInit = "CREATE TABLE users (id integer primary key, email text unique);\n" +
-	"CREATE TABLE albums (id integer primary key, user_id integer references users(id), name text not null);\n" +
-	"CREATE TABLE photos (id integer primary key, album_id integer references albums(id), user_id integer references users(id), path TEXT UNIQUE);\n" +
-	"CREATE TABLE album_permissions (album_id INTEGER REFERENCES albums(id), user_id INTEGER REFERENCES users(id));\n" +
-	"INSERT INTO users (email) VALUES ('user1@example.com');\n" +
-	"INSERT INTO users (email) VALUES ('user2@example.com');\n" +
-	"INSERT INTO albums (user_id, name) VALUES (1, '1 main');\n" +
-	"INSERT INTO albums (user_id, name) VALUES (2, '2 main');\n" +
-	"INSERT INTO albums (user_id, name) VALUES (1, '1s Birthday!');\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (1,1);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (1,2);\n" +
-	"INSERT INTO album_permissions (album_id, user_id) VALUES (2,2);\n" +
-	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/1.jpg');\n" +
-	"INSERT INTO photos (album_id, user_id, path) VALUES (1, 1, '/Users/moose1/Documents/photoApp/Photos/2.png');\n"
-
-const dbClear = "DROP TABLE album_permissions;\n" +
-	"DROP TABLE photos;\n" +
-	"DROP TABLE albums;\n" +
-	"DROP TABLE users;\n"
-*/
 
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
@@ -453,58 +430,21 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	http.Redirect(w, r, "/photo/"+strconv.FormatInt(photoID, 10), http.StatusFound)
 }
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, *syncDB), db *syncDB) http.HandlerFunc {
-	log.Printf("DB: %p", db.Db)
+func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("DB: %p", db.Db)
 		fn(w, r, db)
 	}
 }
 
 func main() {
-	fmt.Println("working")
 	log.SetFlags(log.Lshortfile)
+	log.Println("started...")
 	dbPath := "/Users/moose1/Documents/photoApp/photoAppDB"
-	diskDB, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Printf("failed to open database: %s\n", dbPath)
 	}
-	defer diskDB.Close()
-	db := &syncDB{Db: diskDB}
-
-	/*
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
-		go func() {
-			for sig := range c {
-				fmt.Printf("---Signal: %s\n", sig)
-				db.Mu.Lock()
-				_, err := db.Db.Exec(dbClear)
-				db.Mu.Unlock()
-				if err != nil {
-					log.Printf("failed to clear database: %s\n", err)
-				}
-				os.Exit(1)
-			}
-		}()
-		func() {
-			db.Mu.Lock()
-			defer db.Mu.Unlock()
-			_, err = db.Db.Exec(dbInit)
-			if err != nil {
-				log.Print("failed to initialize database: %s")
-				panic(err)
-			}
-		}()
-		defer func() {
-			fmt.Println("Clearing should be working!")
-			db.Mu.Lock()
-			defer db.Mu.Unlock()
-			_, err = db.Db.Exec(dbClear)
-			log.Printf("failed to clear database: %s", err)
-		}()
-	*/
-
+	defer db.Close()
 	http.HandleFunc("/home/", makeHandler(homeHandler, db))
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
 	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
