@@ -297,15 +297,26 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	a := albumpage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
-	check(err)
+	if err != nil {
+		log.Printf("failed to convert album id string to int: %s", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.Db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		return
+	}
+
 	a.AlbumID = id
 	fmt.Printf("album query: %s \n", a.query())
-	db.Mu.Lock()
-	rows, err := db.Db.Query(a.query())
-	check(err)
-	db.Mu.Unlock()
+	rows, err := tx.Query(a.query())
+	if err != nil {
+		log.Printf("failed query user photos: %s", err)
+		return
+	}
 	defer rows.Close()
-
 	/*
 		if err != nil {
 			log.Fatalf("ERROR: album query\n%e\n", err)
@@ -314,6 +325,9 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	err = a.render(w, r, rows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
 	}
 }
 
