@@ -30,12 +30,6 @@ import (
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
 // create a new user along with an initial album
 func newUser(email string, tx *sql.Tx) error {
 	r, err := tx.Exec("insert into users (email) values (?)", email)
@@ -106,7 +100,9 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
 			return 0, "", fmt.Errorf("failed to insert photo: %w", err)
 		}
 		photoID, err = res.LastInsertId()
-		check(err)
+		if err != nil {
+			return 0, "", fmt.Errorf("failed to get photoID: %w", err)
+		}
 		path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
 		_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
 		if err != nil {
@@ -136,28 +132,37 @@ func givePerm(albumID int64, userID int64, tx *sql.Tx) error {
 	return nil
 }
 
-func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
+func showTags(userID int64, db *sql.DB) ([]int64, []int64, error) {
 	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedPhotoRows.Close()
-	check(err)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to access photo tags: %w", err)
+	}
 	taggedPhotos := make([]int64, 0)
 	for i := 0; taggedPhotoRows.Next(); i++ {
 		var newElem int64
 		taggedPhotos = append(taggedPhotos, newElem)
 		err := taggedPhotoRows.Scan(&taggedPhotos[i])
-		check(err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan tagged photo ids: %w", err)
+
+		}
 	}
 	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedAlbumRows.Close()
-	check(err)
+	if err != nil {
+		return taggedPhotos, nil, fmt.Errorf("failed to access tagged albums: %w", err)
+	}
 	taggedAlbums := make([]int64, 0)
 	for i := 0; taggedAlbumRows.Next(); i++ {
 		var newElem int64
 		taggedAlbums = append(taggedAlbums, newElem)
 		err := taggedAlbumRows.Scan(&taggedAlbums[i])
-		check(err)
+		if err != nil {
+			return taggedPhotos, nil, fmt.Errorf("failed to scan tagged album")
+		}
 	}
-	return taggedPhotos, taggedAlbums
+	return taggedPhotos, taggedAlbums, nil
 }
 
 var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html"))
@@ -306,7 +311,9 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	var err error
 	id, err := strconv.ParseInt(m[2], 10, 64)
-	check(err)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 	p.PhotoID = id
 
 	err = p.render(w)
@@ -373,7 +380,11 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	err := r.ParseMultipartForm(1000000)
-	check(err)
+	if err != nil {
+		log.Printf("failed to parse multipart form: %w", err)
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
 	imageInput := r.MultipartForm.File
 	fh := imageInput["photo"]
 	if len(fh) < 1 {
@@ -384,13 +395,20 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	fmt.Printf("uploaded file size: %v\n", fh[0].Size)
 	mpf, err := fh[0].Open()
 	defer mpf.Close()
-	check(err)
-
+	if err != nil {
+		log.Printf("failed to open multipart file: %w", err)
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	albumID, err := strconv.ParseInt(m[2], 10, 64)
-	check(err)
-	//TODO: Get userID from site token or cookie
+	if err != nil {
+		log.Printf("failed to convert albumID string to int")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
+	//TODO: Get userID from site token or cookie
 	photoID, path, err := addPhoto(albumID, 1, db)
 	if err != nil {
 		log.Printf("failed to add photo to database: %s", err)
