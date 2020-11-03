@@ -439,6 +439,9 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		header := w.Header()
+		header["Cache-control"] = []string{"no-store", "must-revalidate"}
+		header["Expires"] = []string{"0"}
 		fn(w, r, db)
 	}
 }
