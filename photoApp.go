@@ -36,11 +36,6 @@ func check(e error) {
 	}
 }
 
-type syncDB struct {
-	Db *sql.DB
-	Mu sync.Mutex
-}
-
 // create a new user along with an initial album
 func newUser(email string, tx *sql.Tx) error {
 	r, err := tx.Exec("insert into users (email) values (?)", email)
@@ -96,18 +91,16 @@ func checkPerm(albumID int64, userID int64, tx *sql.Tx) bool {
 }
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
-func addPhoto(albumID int64, userID int64, db *syncDB) (int64, string, error) {
+func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
 	var photoID int64
 	var path string
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tx, err := db.Db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	if checkPerm(albumID, userID, tx) == true {
-		db.Mu.Lock()
-		defer db.Mu.Unlock()
 		res, err := tx.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
 		if err != nil {
 			return 0, "", fmt.Errorf("failed to insert photo: %w", err)
@@ -143,12 +136,10 @@ func givePerm(albumID int64, userID int64, tx *sql.Tx) error {
 	return nil
 }
 
-func showTags(userID int64, db *syncDB) ([]int64, []int64) {
-	db.Mu.Lock()
-	taggedPhotoRows, err := db.Db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
+func showTags(userID int64, db *sql.DB) ([]int64, []int64) {
+	taggedPhotoRows, err := db.Query("SELECT id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedPhotoRows.Close()
 	check(err)
-	db.Mu.Unlock()
 	taggedPhotos := make([]int64, 0)
 	for i := 0; taggedPhotoRows.Next(); i++ {
 		var newElem int64
@@ -156,11 +147,9 @@ func showTags(userID int64, db *syncDB) ([]int64, []int64) {
 		err := taggedPhotoRows.Scan(&taggedPhotos[i])
 		check(err)
 	}
-	db.Mu.Lock()
-	taggedAlbumRows, err := db.Db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
+	taggedAlbumRows, err := db.Query("SELECT album_id FROM photos JOIN tags ON photos.id = tags.photo_id WHERE tagged_user_id = ?", userID)
 	defer taggedAlbumRows.Close()
 	check(err)
-	db.Mu.Unlock()
 	taggedAlbums := make([]int64, 0)
 	for i := 0; taggedAlbumRows.Next(); i++ {
 		var newElem int64
@@ -238,7 +227,7 @@ func (a albumpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows
 	return templates.ExecuteTemplate(w, "album.html", a)
 }
 
-func homeHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
+func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	h := homepage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
@@ -249,7 +238,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tx, err := db.Db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("failed to begin transaction: %s", err)
 		return
@@ -270,7 +259,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	}
 }
 
-func albumHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
+func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	a := albumpage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
@@ -280,7 +269,7 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tx, err := db.Db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("failed to begin transaction: %s", err)
 		return
@@ -311,7 +300,7 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 var validPath = regexp.MustCompile("^/(home|album|photo|photos|upload)/([a-zA-Z0-9]+)$")
 
 // serves HTML
-func photoHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
+func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 
@@ -327,10 +316,10 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 }
 
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
-func photosHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
+func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tx, err := db.Db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("failed to begin transaction: %s", err)
 		return
@@ -382,7 +371,7 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	}
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
+func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	err := r.ParseMultipartForm(1000000)
 	check(err)
 	imageInput := r.MultipartForm.File
