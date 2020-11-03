@@ -265,17 +265,31 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 	h := homepage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
-	check(err)
+	if err != nil {
+		log.Printf("failed to convert user id string to int: %s", err)
+	}
 	h.UserID = id
 
-	rows, err := db.Db.Query(h.query())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.Db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		return
+	}
+
+	rows, err := tx.Query(h.query())
 	defer rows.Close()
 	if err != nil {
-		log.Panic("ERROR: invalid user id\n")
+		log.Printf("failed to query database for user albums: %s", err)
 	}
 	err = h.render(w, r, rows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
 	}
 }
 
