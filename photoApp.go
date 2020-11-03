@@ -351,34 +351,58 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
 
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
 func photosHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
-	db.Mu.Lock()
-	rows, err := db.Db.Query("SELECT path FROM photos WHERE album_id = 1")
-	check(err)
-	db.Mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.Db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		return
+	}
+	rows, err := tx.Query("SELECT path FROM photos WHERE album_id = 1") //TODO: replace album id with variable
+	if err != nil {
+		log.Printf("failed to query database for photo path: %s", err)
+		return
+	}
 	var result string
 	if rows.Next() {
 		err = rows.Scan(&result)
-		check(err)
+		if err != nil {
+			log.Printf("failed to scan path query result: %s", err)
+			return
+		}
 	}
 	fmt.Printf(">>>>>>>>>>>>>>>>> query result: %v\n", result)
 	fmt.Printf("Photos path request: % +v\n", r.URL.Path)
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
-	check(err)
+	if err != nil {
+		log.Printf("failed to convert id string to int: %s", err)
+		return
+	}
 	var path string
-	db.Mu.Lock()
-	err = db.Db.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
-	check(err)
-	db.Mu.Unlock()
+	err = tx.QueryRow("SELECT path FROM photos WHERE id = ?", id).Scan(&path)
+	if err != nil {
+		log.Printf("failed to get photo path: %s", err)
+		return
+	}
 	/*
 		if err != nil {
 			log.Fatalf("ERROR: path query\n %e\n", err)
 		}
 	*/
 	f, err := os.Open(path)
-	check(err)
+	if err != nil {
+		log.Printf("failed to open photo: %s", err)
+		return
+	}
 	_, err = io.Copy(w, f)
-	check(err)
+	if err != nil {
+		log.Printf("failed to copy photo to response writer: %s", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
 }
 
 func uploadHandler(w http.ResponseWriter, r *http.Request, db *syncDB) {
