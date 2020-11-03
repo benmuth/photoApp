@@ -306,6 +306,7 @@ var validPath = regexp.MustCompile("^/(home|album|photo|photos|upload)/([a-zA-Z0
 
 // serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 
@@ -316,6 +317,19 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 	p.PhotoID = id
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		return
+	}
+	row := tx.QueryRow("SELECT album_id FROM photos WHERE id = ?", id)
+	var albumID int64
+	if err := row.Scan(&albumID); err != nil {
+		log.Printf("failed to scan albumID: %s", err)
+	}
+	p.AlbumID = albumID
 	err = p.render(w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
