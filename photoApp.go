@@ -283,11 +283,11 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	a.AlbumID = id
 	fmt.Printf("album query: %s \n", a.query())
 	rows, err := tx.Query(a.query())
+	defer rows.Close()
 	if err != nil {
 		log.Printf("failed query user photos: %s", err)
 		return
 	}
-	defer rows.Close()
 	/*
 		if err != nil {
 			log.Fatalf("ERROR: album query\n%e\n", err)
@@ -346,6 +346,7 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 	rows, err := tx.Query("SELECT path FROM photos WHERE album_id = 1") //TODO: replace album id with variable
+	defer rows.Close()                                                  //forgot this close!!
 	if err != nil {
 		log.Printf("failed to query database for photo path: %s", err)
 		return
