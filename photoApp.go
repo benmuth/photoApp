@@ -165,7 +165,7 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64, error) {
 	return taggedPhotos, taggedAlbums, nil
 }
 
-var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html"))
+var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html"))
 
 type page interface {
 	query() string
@@ -230,6 +230,41 @@ func (a albumpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows
 	a.Photos = photos
 	fmt.Printf("album photos: %v\n", a.Photos)
 	return templates.ExecuteTemplate(w, "album.html", a)
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(r.URL.Query()) > 0 {
+		email := r.FormValue("email")
+		log.Printf("entered email: %s", email)
+		row := tx.QueryRow("SELECT id FROM users WHERE email = ?", email)
+		var id int64
+		err = row.Scan(&id)
+		if err != nil {
+			log.Printf("failed to scan row: %s", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Redirect(w, r, "/login/", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/home/"+strconv.FormatInt(id, 10), http.StatusFound)
+	} else {
+		if err := templates.ExecuteTemplate(w, "login.html", homepage{}); err != nil {
+			log.Printf("failed to execute login template: %s", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -302,11 +337,10 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(home|album|photo|photos|upload)/([a-zA-Z0-9]+)$")
+var validPath = regexp.MustCompile("^/(login|home|album|photo|photos|upload)/([a-zA-Z0-9]+)$")
 
 // serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 
@@ -393,6 +427,7 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
+//TODO: move checkPerm call from addPhoto to uploadHandler
 func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	err := r.ParseMultipartForm(1000000)
 	if err != nil {
@@ -470,6 +505,7 @@ func main() {
 		log.Printf("failed to open database: %s\n", dbPath)
 	}
 	defer db.Close()
+	http.HandleFunc("/login/", makeHandler(loginHandler, db))
 	http.HandleFunc("/home/", makeHandler(homeHandler, db))
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
 	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
