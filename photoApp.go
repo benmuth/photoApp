@@ -30,7 +30,7 @@ import (
 
 // these functions are to be used with a database that includes following tables (! = primary key):
 // users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
-
+// sessions: user_id|session_id
 // create a new user along with an initial album
 func newUser(email string, tx *sql.Tx) error {
 	r, err := tx.Exec("insert into users (email) values (?)", email)
@@ -176,6 +176,33 @@ func randString(n int) string {
 	return string(b)
 }
 
+// TODO: move begin transaction code to separate function
+func checkSesh(w http.ResponseWriter, r *http.Request, db *sql.DB) (int64, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	cookie, err := r.Cookie("Set-Cookie")
+	if err != nil {
+		http.Redirect(w, r, "/login/", http.StatusFound)
+		return 0, fmt.Errorf("failed to get cookie from request: %w", err)
+	}
+	row := tx.QueryRow("SELECT user_id FROM sessions WHERE session_id = ?", cookie.Value)
+	var userID int64
+	err = row.Scan(userID)
+	if err != nil {
+		http.Redirect(w, r, "/login/", http.StatusFound)
+		return 0, fmt.Errorf("failed to scan query result: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
+	return userID, nil
+}
+
 var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html"))
 
 type page interface {
@@ -260,12 +287,21 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		err = row.Scan(&id)
 		if err != nil {
 			log.Printf("failed to scan row: %s", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			http.Redirect(w, r, "/login/", http.StatusFound)
+			http.Error(w, err.Error(), http.StatusInternalServerError) // should probably be a different status code since it will mostly apply to invalid logins
+			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
 			return
 		}
+
+		sessionID := randString(10)
+		_, err = tx.Exec("INSERT INTO sessions (user_id, session_id) VALUES (?, ?)", id, sessionID)
+		if err != nil {
+			log.Printf("failed to insert session id into database: %s", err)
+			http.Redirect(w, r, "/login/", http.StatusInternalServerError)
+		}
+		w.Header().Set("Set-Cookie", sessionID)
 		http.Redirect(w, r, "/home/"+strconv.FormatInt(id, 10), http.StatusFound)
-	} else {
+
+	} else { // if there is no query, send to login page
 		if err := templates.ExecuteTemplate(w, "login.html", homepage{}); err != nil {
 			log.Printf("failed to execute login template: %s", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -278,6 +314,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	_, err := checkSesh(w, r, db)
+	if err != nil {
+		log.Printf("failed to validate user session: %s", err)
+	}
+
 	h := homepage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
@@ -310,6 +351,11 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	_, err := checkSesh(w, r, db)
+	if err != nil {
+		log.Printf("failed to validate user session: %s", err)
+	}
+
 	a := albumpage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
@@ -351,10 +397,14 @@ var validPath = regexp.MustCompile("^/(login|home|album|photo|photos|upload)/([a
 
 // serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	_, err := checkSesh(w, r, db)
+	if err != nil {
+		log.Printf("failed to validate user session: %s", err)
+	}
+
 	p := photopage{}
 	m := validPath.FindStringSubmatch(r.URL.Path)
 
-	var err error
 	id, err := strconv.ParseInt(m[2], 10, 64)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -382,6 +432,11 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 // serves images /photos/1 -> /Users/moose1/Documents/photoApp/Photos/1.jpg
 func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	_, err := checkSesh(w, r, db)
+	if err != nil {
+		log.Printf("failed to validate user session: %s", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tx, err := db.BeginTx(ctx, nil)
@@ -439,7 +494,12 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 //TODO: move checkPerm call from addPhoto to uploadHandler
 func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	err := r.ParseMultipartForm(1000000)
+	_, err := checkSesh(w, r, db)
+	if err != nil {
+		log.Printf("failed to validate user session: %s", err)
+	}
+
+	err = r.ParseMultipartForm(1000000)
 	if err != nil {
 		log.Printf("failed to parse multipart form: %w", err)
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
