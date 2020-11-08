@@ -19,6 +19,7 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
@@ -165,6 +166,16 @@ func showTags(userID int64, db *sql.DB) ([]int64, []int64, error) {
 	return taggedPhotos, taggedAlbums, nil
 }
 
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+func randString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letterBytes[rand.Int63()%int64(len(letterBytes))]
+	}
+	return string(b)
+}
+
 var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html"))
 
 type page interface {
@@ -201,7 +212,6 @@ func (p photopage) render(w http.ResponseWriter) error {
 	return templates.ExecuteTemplate(w, "photo.html", p)
 }
 
-// TODO: handle errors instead of panicking
 func (h homepage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows) error {
 	albums := make([]int64, 0)
 	for i := 0; rows.Next(); i++ {
@@ -242,7 +252,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	if len(r.URL.Query()) > 0 {
+	if len(r.URL.Query()) > 0 { // is there a better way to check if user credentials were input?
 		email := r.FormValue("email")
 		log.Printf("entered email: %s", email)
 		row := tx.QueryRow("SELECT id FROM users WHERE email = ?", email)
