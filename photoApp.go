@@ -185,14 +185,14 @@ func checkSesh(w http.ResponseWriter, r *http.Request, db *sql.DB) (int64, error
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	cookie, err := r.Cookie("Set-Cookie")
+	cookie, err := r.Cookie("session_cookie")
 	if err != nil {
 		http.Redirect(w, r, "/login/", http.StatusFound)
 		return 0, fmt.Errorf("failed to get cookie from request: %w", err)
 	}
 	row := tx.QueryRow("SELECT user_id FROM sessions WHERE session_id = ?", cookie.Value)
 	var userID int64
-	err = row.Scan(userID)
+	err = row.Scan(&userID)
 	if err != nil {
 		http.Redirect(w, r, "/login/", http.StatusFound)
 		return 0, fmt.Errorf("failed to scan query result: %w", err)
@@ -287,7 +287,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		err = row.Scan(&id)
 		if err != nil {
 			log.Printf("failed to scan row: %s", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError) // should probably be a different status code since it will mostly apply to invalid logins
 			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
 			return
 		}
@@ -298,10 +297,14 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			log.Printf("failed to insert session id into database: %s", err)
 			http.Redirect(w, r, "/login/", http.StatusInternalServerError)
 		}
-		w.Header().Set("Set-Cookie", sessionID)
+		cookie := http.Cookie{
+			Name:  "session_cookie",
+			Value: sessionID,
+			Path:  "/",
+		}
+		http.SetCookie(w, &cookie)
 		http.Redirect(w, r, "/home/"+strconv.FormatInt(id, 10), http.StatusFound)
-
-	} else { // if there is no query, send to login page
+	} else { // if there is no query, send back to login page
 		if err := templates.ExecuteTemplate(w, "login.html", homepage{}); err != nil {
 			log.Printf("failed to execute login template: %s", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
