@@ -26,35 +26,41 @@ import (
 	"strconv"
 
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // these functions are to be used with a database that includes following tables (! = primary key):
-// users: id!|email		albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
+// users: id!|email|password	albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
 // sessions: user_id|session_id
 // create a new user along with an initial album
-func newUser(email string, tx *sql.Tx) error {
-	r, err := tx.Exec("insert into users (email) values (?)", email)
+func newUser(email string, password string, tx *sql.Tx) (int64, error) {
+	passwordBytes := []byte(password)
+	hashedPassword, err := bcrypt.GenerateFromPassword(passwordBytes, 1)
 	if err != nil {
-		return fmt.Errorf("failed to add users: %w", err)
+		return 0, fmt.Errorf("failed to hash password: %w", err)
+	}
+	r, err := tx.Exec("INSERT INTO users (email, password) VALUES (?, ?)", email, hashedPassword)
+	if err != nil {
+		return 0, fmt.Errorf("failed to add user: %w", err)
 	}
 	userID, err := r.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("failed to get new user id: %w", err)
+		return 0, fmt.Errorf("failed to get new user id: %w", err)
 	}
 	mainAlbum := fmt.Sprintf("%s's Photos", email)
 	r, err = tx.Exec("insert into albums (user_id, name) values (?, ?)", userID, mainAlbum)
 	if err != nil {
-		return fmt.Errorf("failed to create user album: %w", err)
+		return 0, fmt.Errorf("failed to create user album: %w", err)
 	}
 	albumID, err := r.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("failed to get album id: %w", err)
+		return 0, fmt.Errorf("failed to get album id: %w", err)
 	}
 	err = givePerm(albumID, userID, tx)
 	if err != nil {
-		return fmt.Errorf("failed to give user permission to main album: %w", err)
+		return 0, fmt.Errorf("failed to give user permission to main album: %w", err)
 	}
-	return nil
+	return userID, nil
 }
 
 func newAlbum(name string, userID int64, tx *sql.Tx) error {
@@ -95,23 +101,23 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	if checkPerm(albumID, userID, tx) == true {
-		res, err := tx.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
-		if err != nil {
-			return 0, "", fmt.Errorf("failed to insert photo: %w", err)
-		}
-		photoID, err = res.LastInsertId()
-		if err != nil {
-			return 0, "", fmt.Errorf("failed to get photoID: %w", err)
-		}
-		path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
-		_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
-		if err != nil {
-			return 0, "", fmt.Errorf("failed to add path to photo table: %w", err)
-		}
-	} else {
-		return 0, "", fmt.Errorf("user doesn't have permission to access album")
+	//if checkPerm(albumID, userID, tx) == true {
+	res, err := tx.Exec("INSERT INTO photos (user_id, album_id) VALUES (?, ?)", userID, albumID)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to insert photo: %w", err)
 	}
+	photoID, err = res.LastInsertId()
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to get photoID: %w", err)
+	}
+	path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
+	_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to add path to photo table: %w", err)
+	}
+	//} else {
+	//	return 0, "", fmt.Errorf("user doesn't have permission to access album")
+	//}
 	err = tx.Commit()
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to commit transaction: %w", err)
@@ -203,7 +209,7 @@ func checkSesh(w http.ResponseWriter, r *http.Request, db *sql.DB) (int64, error
 	return userID, nil
 }
 
-var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html"))
+var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html", "templates/register.html"))
 
 type page interface {
 	query() string
@@ -269,6 +275,55 @@ func (a albumpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows
 	return templates.ExecuteTemplate(w, "album.html", a)
 }
 
+func registerHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(r.URL.Query()) > 0 {
+		email := r.FormValue("email")
+		log.Printf("entered email: %s", email)
+
+		password := r.FormValue("password")
+		log.Printf("entered password: %s", password)
+		id, err := newUser(email, password, tx)
+		if err != nil {
+			log.Printf("failed to add user: %s", err)
+			http.Redirect(w, r, "/register/", http.StatusInternalServerError)
+			return
+		} else {
+			sessionID := randString(10)
+			_, err = tx.Exec("INSERT INTO sessions (user_id, session_id) VALUES (?, ?)", id, sessionID)
+			if err != nil {
+				log.Printf("failed to insert session id into database: %s", err)
+				http.Redirect(w, r, "/login/", http.StatusInternalServerError)
+			}
+			cookie := http.Cookie{
+				Name:  "session_cookie",
+				Value: sessionID,
+				Path:  "/",
+			}
+			http.SetCookie(w, &cookie)
+			http.Redirect(w, r, "/home/"+strconv.FormatInt(id, 10), http.StatusFound)
+		}
+	} else {
+		if err := templates.ExecuteTemplate(w, "register.html", homepage{}); err != nil {
+			log.Printf("failed to execute register template: %s", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
+}
+
 func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -280,6 +335,19 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	if len(r.URL.Query()) > 0 { // is there a better way to check if user credentials were input?
+		if r.URL.Query().Get("logout") == "yes" {
+			cookie, err := r.Cookie("session_cookie")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, err = tx.Exec("DELETE FROM sessions WHERE session_id = ?", cookie.Value)
+			if err != nil {
+				log.Printf("failed to delete session id on logout")
+			}
+			http.Redirect(w, r, "/login/", http.StatusFound)
+			return
+		}
 		email := r.FormValue("email")
 		log.Printf("entered email: %s", email)
 		row := tx.QueryRow("SELECT id FROM users WHERE email = ?", email)
@@ -291,20 +359,44 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			return
 		}
 
-		sessionID := randString(10)
-		_, err = tx.Exec("INSERT INTO sessions (user_id, session_id) VALUES (?, ?)", id, sessionID)
+		inputPassword := r.FormValue("password")
+		log.Printf("entered password: %s", inputPassword)
+		inputPasswordBytes := []byte(inputPassword)
+		/*hashedPassword, err := bcrypt.GenerateFromPassword(inputPassword, 1) // what does minimum cost argument mean?
 		if err != nil {
-			log.Printf("failed to insert session id into database: %s", err)
-			http.Redirect(w, r, "/login/", http.StatusInternalServerError)
+			log.Printf("failed to hash password: %s", err)
+			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
+			return
 		}
-		cookie := http.Cookie{
-			Name:  "session_cookie",
-			Value: sessionID,
-			Path:  "/",
+		*/
+		row = tx.QueryRow("SELECT password FROM users WHERE email = ?", email)
+		var hashedPassword string
+		if err = row.Scan(&hashedPassword); err != nil {
+			log.Printf("failed to retrieve user password: %s", err)
+			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
+			return
 		}
-		http.SetCookie(w, &cookie)
-		http.Redirect(w, r, "/home/"+strconv.FormatInt(id, 10), http.StatusFound)
-	} else { // if there is no query, send back to login page
+		hashedPasswordBytes := []byte(hashedPassword)
+		if err = bcrypt.CompareHashAndPassword(hashedPasswordBytes, inputPasswordBytes); err != nil {
+			log.Printf("user input incorrect password: %s", err)
+			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
+			return
+		} else {
+			sessionID := randString(10)
+			_, err = tx.Exec("INSERT INTO sessions (user_id, session_id) VALUES (?, ?)", id, sessionID)
+			if err != nil {
+				log.Printf("failed to insert session id into database: %s", err)
+				http.Redirect(w, r, "/login/", http.StatusInternalServerError)
+			}
+			cookie := http.Cookie{
+				Name:  "session_cookie",
+				Value: sessionID,
+				Path:  "/",
+			}
+			http.SetCookie(w, &cookie)
+			http.Redirect(w, r, "/home/"+strconv.FormatInt(id, 10), http.StatusFound)
+		}
+	} else { // if there is no query, send to login page
 		if err := templates.ExecuteTemplate(w, "login.html", homepage{}); err != nil {
 			log.Printf("failed to execute login template: %s", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -447,21 +539,23 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		log.Printf("failed to begin transaction: %s", err)
 		return
 	}
-	rows, err := tx.Query("SELECT path FROM photos WHERE album_id = 1") //TODO: replace album id with variable
-	defer rows.Close()                                                  //forgot this close!!
-	if err != nil {
-		log.Printf("failed to query database for photo path: %s", err)
-		return
-	}
-	var result string
-	if rows.Next() {
-		err = rows.Scan(&result)
+	/*
+		rows, err := tx.Query("SELECT path FROM photos WHERE album_id = 1") //TODO: replace album id with variable
+		defer rows.Close()                                                  //forgot this close!!
 		if err != nil {
-			log.Printf("failed to scan path query result: %s", err)
+			log.Printf("failed to query database for photo path: %s", err)
 			return
 		}
-	}
-	fmt.Printf(">>>>>>>>>>>>>>>>> query result: %v\n", result)
+		var result string
+		if rows.Next() {
+			err = rows.Scan(&result)
+			if err != nil {
+				log.Printf("failed to scan path query result: %s", err)
+				return
+			}
+		}
+		fmt.Printf(">>>>>>>>>>>>>>>>> query result: %v\n", result)
+	*/
 	fmt.Printf("Photos path request: % +v\n", r.URL.Path)
 	m := validPath.FindStringSubmatch(r.URL.Path)
 	id, err := strconv.ParseInt(m[2], 10, 64)
@@ -584,6 +678,7 @@ func main() {
 	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
 	http.HandleFunc("/photos/", makeHandler(photosHandler, db))
 	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
+	http.HandleFunc("/register/", makeHandler(registerHandler, db))
 
 	log.Println(http.ListenAndServe(":8080", nil))
 }

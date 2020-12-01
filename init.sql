@@ -1,4 +1,4 @@
-CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE);
+CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE, password TEXT UNIQUE);
 CREATE TABLE albums (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id), name TEXT NOT NULL);
 CREATE TABLE photos (id INTEGER PRIMARY KEY, album_id INTEGER REFERENCES albums(id), user_id INTEGER REFERENCES users(id), path TEXT UNIQUE);
 CREATE TABLE album_permissions (album_id INTEGER REFERENCES albums(id), user_id INTEGER REFERENCES users(id));
