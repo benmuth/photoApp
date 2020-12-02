@@ -13,6 +13,7 @@ type photoInfo struct {
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"html/template"
 	_ "image/jpeg"
@@ -664,6 +665,8 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.D
 }
 
 func main() {
+	port := flag.Int("port", 8080, "designate port to bind to.")
+	flag.Parse()
 	log.SetFlags(log.Lshortfile)
 	log.Println("started...")
 	dbPath := "/Users/moose1/Documents/photoApp/photoAppDB"
@@ -680,5 +683,5 @@ func main() {
 	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
 	http.HandleFunc("/register/", makeHandler(registerHandler, db))
 
-	log.Println(http.ListenAndServe(":8080", nil))
+	log.Println(http.ListenAndServe(fmt.Sprintf(":%v", *port), nil))
 }
