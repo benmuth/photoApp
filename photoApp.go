@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/user"
 	"regexp"
 	"strconv"
 
@@ -94,8 +95,7 @@ func checkPerm(albumID int64, userID int64, tx *sql.Tx) bool {
 
 // add a photo to a specified album if the calling user has permission according to the album_permissions table
 func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
-	var photoID int64
-	var path string
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tx, err := db.BeginTx(ctx, nil)
@@ -107,11 +107,19 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to insert photo: %w", err)
 	}
-	photoID, err = res.LastInsertId()
+	var path string
+	photoID, err := res.LastInsertId()
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to get photoID: %w", err)
 	}
-	path = "/Users/moose1/Documents/photoApp/Photos/" + strconv.FormatInt(photoID, 10) //TODO: get image format
+	var dir string
+	_, err = user.Lookup("photos")
+	if err != nil {
+		dir = "/Users/moose1/Documents/photoApp/Photos/"
+	} else {
+		dir = "/home/photos/photoAppDir/PhotosDir"
+	}
+	path = dir + strconv.FormatInt(photoID, 10) //TODO: get image format
 	_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to add path to photo table: %w", err)
@@ -666,11 +674,21 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.D
 
 func main() {
 	port := flag.Int("port", 8080, "designate port to bind to.")
+	dbPath := flag.String("db", "/Users/moose1/Documents/photoApp/photoAppDB", "designate database path to use")
 	flag.Parse()
 	log.SetFlags(log.Lshortfile)
 	log.Println("started...")
-	dbPath := "/Users/moose1/Documents/photoApp/photoAppDB"
-	db, err := sql.Open("sqlite3", dbPath)
+	f, err := os.Open(*dbPath)
+	if err != nil {
+		log.Printf("failed to open database: %s", err)
+		return
+	}
+	_, err = f.Stat()
+	if err != nil {
+		log.Printf("failed to get info about database file: %s", err)
+		return
+	}
+	db, err := sql.Open("sqlite3", *dbPath)
 	if err != nil {
 		log.Printf("failed to open database: %s\n", dbPath)
 	}
