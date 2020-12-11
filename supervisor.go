@@ -7,18 +7,13 @@ import (
 	//"net/http"
 	//"os"
 
-	"flag"
 	"log"
 	"os"
 	"os/exec"
-	"syscall"
 )
 
 func main() {
-	dirPath := flag.String("dirPath", "/Users/moose1/Documents/photoApp/", "designate directory path of executable")
-	dbPath := flag.String("db", "/Users/moose1/Documents/photoApp/photoAppDB", "designate database path to use")
-	flag.Parse()
-	cmd := exec.Command(*dirPath+"photoApp", "-db "+*dbPath)
+	cmd := exec.Command("./"+os.Args[1], os.Args[2:]...)
 	cmd.Stdout = os.Stdout
 	if err := cmd.Start(); err != nil {
 		log.Printf("failed to start app: %s", err)
@@ -49,7 +44,7 @@ func main() {
 		log.Printf("exited?: %v", pState.Exited())
 		done <- true
 	}()
-	cmd.Process.Signal(syscall.SIGINT)
+	// cmd.Process.Signal(syscall.SIGINT)
 	<-done
 	/*
 		if pState.Exited() == true {
