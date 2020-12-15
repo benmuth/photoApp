@@ -13,8 +13,11 @@ import (
 )
 
 func main() {
+	//arg 1 is the name of the program, the rest are the program's args
 	cmd := exec.Command("./"+os.Args[1], os.Args[2:]...)
 	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
 	if err := cmd.Start(); err != nil {
 		log.Printf("failed to start app: %s", err)
 		return
