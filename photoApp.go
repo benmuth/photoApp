@@ -23,8 +23,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"os/user"
-	"regexp"
+	"path"
 	"strconv"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -107,20 +106,16 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to insert photo: %w", err)
 	}
-	var path string
+
 	photoID, err := res.LastInsertId()
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to get photoID: %w", err)
 	}
-	var dir string
-	_, err = user.Lookup("photos")
-	if err != nil {
-		dir = "/Users/moose1/Documents/photoApp/Photos/"
-	} else {
-		dir = "/home/photos/photoAppDir/PhotosDir"
-	}
-	path = dir + strconv.FormatInt(photoID, 10) //TODO: get image format
-	_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", path, photoID)
+
+	dir := os.Getenv("SILSILA_PHOTO_PATH")
+
+	photoPath := path.Join(dir, strconv.FormatInt(photoID, 10)) //TODO: get image format
+	_, err = tx.Exec("UPDATE photos SET path = ? WHERE id = ?", photoPath, photoID)
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to add path to photo table: %w", err)
 	}
@@ -131,7 +126,7 @@ func addPhoto(albumID int64, userID int64, db *sql.DB) (int64, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
-	return photoID, path, nil
+	return photoID, photoPath, nil
 	//add a tag feature to this function?
 }
 
@@ -424,8 +419,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	h := homepage{}
-	m := validPath.FindStringSubmatch(r.URL.Path)
-	id, err := strconv.ParseInt(m[2], 10, 64)
+
+	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		log.Printf("failed to convert user id string to int: %s", err)
 	}
@@ -461,8 +456,8 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	a := albumpage{}
-	m := validPath.FindStringSubmatch(r.URL.Path)
-	id, err := strconv.ParseInt(m[2], 10, 64)
+
+	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		log.Printf("failed to convert album id string to int: %s", err)
 	}
@@ -497,8 +492,6 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(login|home|album|photo|photos|upload)/([a-zA-Z0-9]+)$")
-
 // serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	_, err := checkSesh(w, r, db)
@@ -507,9 +500,8 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	p := photopage{}
-	m := validPath.FindStringSubmatch(r.URL.Path)
 
-	id, err := strconv.ParseInt(m[2], 10, 64)
+	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -566,8 +558,8 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		fmt.Printf(">>>>>>>>>>>>>>>>> query result: %v\n", result)
 	*/
 	fmt.Printf("Photos path request: % +v\n", r.URL.Path)
-	m := validPath.FindStringSubmatch(r.URL.Path)
-	id, err := strconv.ParseInt(m[2], 10, 64)
+
+	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		log.Printf("failed to convert id string to int: %s", err)
 		return
@@ -626,8 +618,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
-	m := validPath.FindStringSubmatch(r.URL.Path)
-	albumID, err := strconv.ParseInt(m[2], 10, 64)
+	albumID, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		log.Printf("failed to convert albumID string to int")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -676,6 +667,12 @@ func main() {
 	port := flag.Int("port", 8080, "designate port to bind to.")
 	dbPath := flag.String("db", "/Users/ben/Documents/photoApp/photoAppDB", "designate database path to use")
 	flag.Parse()
+	pathenv := "SILSILA_PHOTO_PATH"
+	_, ok := os.LookupEnv(pathenv)
+	if !ok {
+		log.Printf("ERR: Photo upload path not set. %s", pathenv)
+		return
+	}
 	log.SetFlags(log.Lshortfile)
 	log.Println("started...")
 	f, err := os.Open(*dbPath)
