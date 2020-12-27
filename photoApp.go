@@ -359,7 +359,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		err = row.Scan(&id)
 		if err != nil {
 			log.Printf("failed to scan row: %s", err)
-			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login/", http.StatusFound)
 			return
 		}
 
@@ -374,15 +374,16 @@ func loginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 		*/
 		row = tx.QueryRow("SELECT password FROM users WHERE email = ?", email)
-		var hashedPassword string
-		if err = row.Scan(&hashedPassword); err != nil {
+		var storedPassword string
+		if err = row.Scan(&storedPassword); err != nil {
 			log.Printf("failed to retrieve user password: %s", err)
 			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
 			return
 		}
-		hashedPasswordBytes := []byte(hashedPassword)
-		if err = bcrypt.CompareHashAndPassword(hashedPasswordBytes, inputPasswordBytes); err != nil {
+		storedPasswordBytes := []byte(storedPassword)
+		if err = bcrypt.CompareHashAndPassword(storedPasswordBytes, inputPasswordBytes); err != nil {
 			log.Printf("user input incorrect password: %s", err)
+			log.Printf("input password: %s | stored password: %s", inputPasswordBytes, storedPasswordBytes)
 			http.Redirect(w, r, "/login/", http.StatusUnauthorized)
 			return
 		} else {
@@ -423,6 +424,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		log.Printf("failed to convert user id string to int: %s", err)
+		http.Redirect(w, r, "/login/", http.StatusFound)
 	}
 	h.UserID = id
 
