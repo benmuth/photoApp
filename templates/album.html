@@ -15,6 +15,7 @@
   {{range .Photos}}
   <li>
     <a href="/photo/{{.}}"><img src= "/photos/{{.}}" alt="TODO: Photo metadata or tags" style="width: 300px;"></a>
+    <form enctype="application/x-www-form-urlencoded" method="POST" action="/photo/delete/{{.}}"><input type="submit" value="delete"></form>
   </li>
   {{ end }}  
 </ul>
