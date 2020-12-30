@@ -13,6 +13,7 @@
     <a href="/album/{{.}}">
       {{.}}
     </a>
+    <form enctype="application/x-www-form-urlencoded" method="POST" action="/album/delete/{{.}}"><input type="submit" value="delete"></form>
   </li>
   {{ end }}  
 </ul>

@@ -495,6 +495,54 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
+func deleteAlbumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	if _, err := checkSesh(w, r, db); err != nil {
+		log.Printf("failed to validate user session: %s", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		return
+	}
+
+	albumID := path.Base(r.URL.Path)
+	var userID string
+	if err = tx.QueryRow("SELECT user_id FROM albums WHERE id = ?", albumID).Scan(&userID); err != nil {
+		log.Printf("failed to select user id from database: %s", err)
+		http.Redirect(w, r, path.Join("/home/", userID), http.StatusFound)
+	}
+
+	//check if last element of path is a number
+	if _, err = strconv.Atoi(albumID); err != nil {
+		log.Printf("failed to get album id to be deleted: %s", err)
+		http.Redirect(w, r, path.Join("/home/", userID), http.StatusFound)
+		return
+	}
+
+	if _, err = tx.Exec("DELETE FROM albums WHERE id = ?", albumID); err != nil {
+		log.Printf("failed to delete album %s from database: %s", albumID, err)
+		http.Redirect(w, r, path.Join("/home/", userID), http.StatusFound)
+		return
+	}
+
+	if _, err = tx.Exec("DELETE FROM photos WHERE album_id = ?", albumID); err != nil {
+		log.Printf("failed to delete photos from album %s from database: %s", albumID, err)
+		http.Redirect(w, r, path.Join("/home/", userID), http.StatusFound)
+		return
+	}
+
+	log.Printf("Deleted album %s and its photos", albumID)
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
+	http.Redirect(w, r, path.Join("/home/", userID), http.StatusFound)
+}
+
 // serves HTML
 func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	_, err := checkSesh(w, r, db)
@@ -742,9 +790,10 @@ func main() {
 	http.HandleFunc("/album/", makeHandler(albumHandler, db))
 	http.HandleFunc("/photo/", makeHandler(photoHandler, db))
 	http.HandleFunc("/photos/", makeHandler(photosHandler, db))
-	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path and regexp parser
+	http.HandleFunc("/upload/", makeHandler(uploadHandler, db)) //TODO: change upload path
 	http.HandleFunc("/register/", makeHandler(registerHandler, db))
 	http.HandleFunc("/photo/delete/", makeHandler(deletePhotoHandler, db))
+	http.HandleFunc("/album/delete/", makeHandler(deleteAlbumHandler, db))
 
 	log.Println(http.ListenAndServe(fmt.Sprintf(":%v", *port), nil))
 }
