@@ -227,6 +227,7 @@ type homepage struct {
 }
 
 type albumpage struct {
+	UserID  int64
 	AlbumID int64
 	Photos  []int64
 }
@@ -422,12 +423,12 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	h := homepage{}
 
-	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
+	id := path.Base(r.URL.Path)
+	h.UserID, err = strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 	if err != nil {
 		log.Printf("failed to convert user id string to int: %s", err)
 		http.Redirect(w, r, "/login/", http.StatusFound)
 	}
-	h.UserID = id
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -435,6 +436,28 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if err != nil {
 		log.Printf("failed to begin transaction: %s", err)
 		return
+	}
+
+	if len(r.URL.Query()) > 0 {
+
+		//if the form has been filled in, create a new album with the entered name
+		albumName := r.FormValue("album name")
+		if albumName == "" {
+			log.Printf("user didn't input album name, no album created")
+			http.Redirect(w, r, path.Join("/home/", id), http.StatusFound)
+		} else {
+			res, err := tx.Exec("INSERT INTO albums (user_id, name) VALUES (?, ?)", h.UserID, albumName)
+			if err != nil {
+				log.Printf("failed to create new album: %s", err)
+				http.Redirect(w, r, path.Join("/home/", id), http.StatusFound)
+			}
+			albumID, err := res.LastInsertId()
+			if err != nil {
+				log.Printf("failed to get id of new album: %s", err)
+			}
+			log.Printf("album %s with id %v created", albumName, albumID)
+			http.Redirect(w, r, path.Join("/album/", strconv.FormatInt(albumID, 10)), http.StatusFound)
+		}
 	}
 
 	rows, err := tx.Query(h.query())
@@ -453,8 +476,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	_, err := checkSesh(w, r, db)
-	if err != nil {
+	if _, err := checkSesh(w, r, db); err != nil {
 		log.Printf("failed to validate user session: %s", err)
 	}
 
@@ -474,11 +496,18 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	a.AlbumID = id
+
 	fmt.Printf("album query: %s \n", a.query())
-	rows, err := tx.Query(a.query())
-	defer rows.Close()
+	photoRows, err := tx.Query(a.query())
+	defer photoRows.Close()
+
+	userRow := tx.QueryRow("SELECT user_id FROM albums WHERE id = ?", id)
+	var userID int64
+	userRow.Scan(&userID)
+	a.UserID = userID
+
 	if err != nil {
-		log.Printf("failed query user photos: %s", err)
+		log.Printf("failed to query user photos: %s", err)
 		return
 	}
 	/*
@@ -486,7 +515,7 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			log.Fatalf("ERROR: album query\n%e\n", err)
 		}
 	*/
-	err = a.render(w, r, rows)
+	err = a.render(w, r, photoRows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -721,21 +750,16 @@ func deletePhotoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	photoID := path.Base(r.URL.Path)
 
+	//get albumID of photo to use for redirect destination in case of error
 	var albumID string
 	if err = tx.QueryRow("SELECT album_id FROM photos WHERE id = ?", photoID).Scan(&albumID); err != nil {
 		log.Printf("failed to select album id from database: %s", err)
-		http.Redirect(w, r, "/home/", http.StatusFound)
+		http.Redirect(w, r, "/home/", http.StatusFound) //TODO: redirect to specific homepage of user
 	}
 
 	//check if last element of path is a number
 	if _, err = strconv.Atoi(photoID); err != nil {
 		log.Printf("failed to get photo id to be deleted: %s", err)
-		http.Redirect(w, r, path.Join("/album/", albumID), http.StatusFound)
-		return
-	}
-
-	if err = os.Remove(filepath.Join(os.Getenv("SILSILA_PHOTO_PATH"), photoID)); err != nil {
-		log.Printf("failed to delete photo %s from system: %s", photoID, err)
 		http.Redirect(w, r, path.Join("/album/", albumID), http.StatusFound)
 		return
 	}
@@ -746,13 +770,23 @@ func deletePhotoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
+	if err = os.Remove(filepath.Join(os.Getenv("SILSILA_PHOTO_PATH"), photoID)); err != nil {
+		log.Printf("failed to delete photo %s from system: %s", photoID, err)
+		http.Redirect(w, r, path.Join("/album/", albumID), http.StatusFound)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
 	http.Redirect(w, r, path.Join("/album/", albumID), http.StatusFound)
 }
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
-		header["Cache-control"] = []string{"no-store", "must-revalidate"}
+		header["Cache-control"] = []string{"no-cache", "no-store", "must-revalidate"}
+		header["Pragma"] = []string{"no-cache"}
 		header["Expires"] = []string{"0"}
 		fn(w, r, db)
 	}

@@ -6,6 +6,14 @@
 </head>
 <h5><a href="/login/?logout=yes">logout</a></h5>
 <h1>{{.UserID}}'s albums</h1>
+<form> 
+  <div>
+    <label for="album name">Enter name of new album:</label>
+    <input id="album name" type="text" name="album name">
+    <input type="submit" value="Create album">
+  </div>
+</form>
+
 <body>
 <ul>
   {{range .Albums}}
