@@ -4,7 +4,7 @@
   <meta charset = "UTF-8">
   <title>album: {{.AlbumID}}</title>
 </head>
-<h5><a href="/login/?logout=yes">logout</a></h5>
+<h5><a href="/login/?logout=yes">logout</a> <a href="/home/{{.UserID}}">home</a> </h5>
 <h1>album: {{.AlbumID}}</h1>
 <h3><form enctype="multipart/form-data" method="POST" action="/upload/{{.AlbumID}}">
   <input type="file" accept="image/png" name="photo">
