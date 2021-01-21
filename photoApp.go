@@ -217,7 +217,6 @@ func checkSesh(w http.ResponseWriter, r *http.Request, db *sql.DB) (int64, error
 var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html", "templates/register.html"))
 
 type page interface {
-	query() string
 	render(w http.ResponseWriter, r *http.Request, rows *sql.Rows)
 }
 
@@ -230,6 +229,7 @@ type albumpage struct {
 	UserID  int64
 	AlbumID int64
 	Photos  []int64
+	Tags    []string
 }
 
 type photopage struct {
@@ -237,15 +237,6 @@ type photopage struct {
 	PhotoID int64
 	Path    string
 	Tags    []string
-}
-
-func (h homepage) query() string {
-	//TODO: get user_id from http request header
-	return "SELECT id FROM albums WHERE user_id = " + strconv.FormatInt(h.UserID, 10)
-}
-
-func (a albumpage) query() string {
-	return "SELECT id FROM photos WHERE album_id = " + strconv.FormatInt(a.AlbumID, 10)
 }
 
 func (p photopage) render(w http.ResponseWriter) error {
@@ -461,7 +452,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 	}
 
-	rows, err := tx.Query(h.query())
+	rows, err := tx.Query("SELECT id FROM albums WHERE user_id = ?", h.UserID)
 	defer rows.Close()
 	if err != nil {
 		log.Printf("failed to query database for user albums: %s", err)
@@ -498,8 +489,7 @@ func albumHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	a.AlbumID = id
 
-	fmt.Printf("album query: %s \n", a.query())
-	photoRows, err := tx.Query(a.query())
+	photoRows, err := tx.Query("SELECT id FROM photos WHERE album_id = ?", a.AlbumID)
 	defer photoRows.Close()
 
 	userRow := tx.QueryRow("SELECT user_id FROM albums WHERE id = ?", id)
