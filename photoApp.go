@@ -236,6 +236,7 @@ type photopage struct {
 	AlbumID int64
 	PhotoID int64
 	Path    string
+	Tags    []string
 }
 
 func (h homepage) query() string {
@@ -438,8 +439,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
+	//create new album
 	if len(r.URL.Query()) > 0 {
-
 		//if the form has been filled in, create a new album with the entered name
 		albumName := r.FormValue("album name")
 		if albumName == "" {
@@ -581,11 +582,11 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	p := photopage{}
 
-	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
+	id := path.Base(r.URL.Path)
+	p.PhotoID, err = strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-	p.PhotoID = id
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -594,11 +595,54 @@ func photoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		log.Printf("failed to begin transaction: %s", err)
 		return
 	}
+
+	var userID int64
+	if len(r.URL.Query()) > 0 {
+		//if the form has been filled in, create a new album with the entered name
+		taggedEmail := r.FormValue("tag") //TODO: change to username once usernames are implemented
+		//how to handle errors here? does return work? Need to make sure second if statement doesn't execute
+		//after an error
+		if taggedEmail == "" {
+			log.Printf("failed to create tag: no user input")
+			http.Redirect(w, r, path.Join("photo", id), http.StatusFound)
+		} else {
+			if err = tx.QueryRow("SELECT id FROM users WHERE email = ?", taggedEmail).Scan(&userID); err != nil {
+				log.Printf("failed to find user with email %s", taggedEmail)
+				http.Redirect(w, r, path.Join("/photo/", id), http.StatusFound)
+				return
+			}
+			_, err := tx.Exec("INSERT INTO tags (photo_id, user_id) VALUES (?, ?)", p.PhotoID, userID)
+			if err != nil {
+				log.Printf("failed to tag new user %s: %s", taggedEmail, err)
+				http.Redirect(w, r, path.Join("/photo/", id), http.StatusFound)
+				return
+			}
+		}
+	}
+
+	taggedRows, err := tx.Query("SELECT email FROM users JOIN tags ON users.id = tags.user_id WHERE tags.photo_id = ?", p.PhotoID)
+	defer taggedRows.Close()
+	if err != nil {
+		log.Printf("failed to get tagged users from database: %s", err)
+		http.Redirect(w, r, path.Join("/photo/", id), http.StatusFound)
+	}
+	emails := make([]string, 0)
+	for i := 0; taggedRows.Next(); i++ {
+		var newElem string
+		emails = append(emails, newElem)
+		if err = taggedRows.Scan(&emails[i]); err != nil {
+			log.Printf("failed to scan emails from result of tag query: %s", err)
+			http.Redirect(w, r, path.Join("/photo/", id), http.StatusFound)
+		}
+	}
+	p.Tags = emails
+	//for navigation back to the album level
 	row := tx.QueryRow("SELECT album_id FROM photos WHERE id = ?", id)
 	var albumID int64
 	if err := row.Scan(&albumID); err != nil {
 		log.Printf("failed to scan albumID: %s", err)
 	}
+
 	p.AlbumID = albumID
 	err = p.render(w)
 	if err != nil {
@@ -620,6 +664,7 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		log.Printf("failed to begin transaction: %s", err)
 		return
 	}
+
 	/*
 		rows, err := tx.Query("SELECT path FROM photos WHERE album_id = 1") //TODO: replace album id with variable
 		defer rows.Close()                                                  //forgot this close!!
