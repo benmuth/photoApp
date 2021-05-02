@@ -9,5 +9,17 @@
 <h4><a href="/album/{{.AlbumID}}">Back to album</a></h4>
 <body>
     <img src="/photos/{{.PhotoID}}" alt="TODO: Photo metadata or tags">
+    <ul>
+      {{range .Tags}}
+      <li>
+        <a href="/view/{{.}}">{{.}}</a>
+      </li>
+      {{ end }}  
+    </ul>
+    <form> 
+        <label for="tag">Enter user to tag: </label>
+        <input id="tag" type="text" name="tag">
+        <input type="submit" value="Add tag">
+    </form>
 </body>
 </html>
