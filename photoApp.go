@@ -32,7 +32,7 @@ import (
 )
 
 // these functions are to be used with a database that includes following tables (! = primary key):
-// users: id!|email|password	albums: id!|userid|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
+// users: id!|email|password	albums: id!|user_id|name	     photos: id!|album_id|user_id|path		album_permissions: album_id|user_id	tags: photo_id|tagged_id
 // sessions: user_id|session_id
 // create a new user along with an initial album
 func newUser(email string, password string, tx *sql.Tx) (int64, error) {
@@ -214,7 +214,7 @@ func checkSesh(w http.ResponseWriter, r *http.Request, db *sql.DB) (int64, error
 	return userID, nil
 }
 
-var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html", "templates/register.html"))
+var templates = template.Must(template.ParseFiles("templates/home.html", "templates/album.html", "templates/photo.html", "templates/login.html", "templates/register.html", "templates/view.html"))
 
 type page interface {
 	render(w http.ResponseWriter, r *http.Request, rows *sql.Rows)
@@ -229,7 +229,7 @@ type albumpage struct {
 	UserID  int64
 	AlbumID int64
 	Photos  []int64
-	Tags    []string
+	//Tags    []string
 }
 
 type photopage struct {
@@ -239,10 +239,16 @@ type photopage struct {
 	Tags    []string
 }
 
+type viewpage struct {
+	UserID int64
+	Photos []int64
+}
+
 func (p photopage) render(w http.ResponseWriter) error {
 	return templates.ExecuteTemplate(w, "photo.html", p)
 }
 
+//
 func (h homepage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows) error {
 	albums := make([]int64, 0)
 	for i := 0; rows.Next(); i++ {
@@ -271,6 +277,20 @@ func (a albumpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows
 	a.Photos = photos
 	fmt.Printf("album photos: %v\n", a.Photos)
 	return templates.ExecuteTemplate(w, "album.html", a)
+}
+
+func (v viewpage) render(w http.ResponseWriter, r *http.Request, rows *sql.Rows) error {
+	photos := make([]int64, 0)
+	for i := 0; rows.Next(); i++ {
+		var newElem int64
+		photos = append(photos, newElem)
+		err := rows.Scan(&photos[i])
+		if err != nil {
+			return err
+		}
+	}
+	v.Photos = photos
+	return templates.ExecuteTemplate(w, "view.html", v)
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -655,23 +675,6 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	/*
-		rows, err := tx.Query("SELECT path FROM photos WHERE album_id = 1") //TODO: replace album id with variable
-		defer rows.Close()                                                  //forgot this close!!
-		if err != nil {
-			log.Printf("failed to query database for photo path: %s", err)
-			return
-		}
-		var result string
-		if rows.Next() {
-			err = rows.Scan(&result)
-			if err != nil {
-				log.Printf("failed to scan path query result: %s", err)
-				return
-			}
-		}
-		fmt.Printf(">>>>>>>>>>>>>>>>> query result: %v\n", result)
-	*/
 	fmt.Printf("Photos path request: % +v\n", r.URL.Path)
 
 	id, err := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
@@ -685,11 +688,7 @@ func photosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		log.Printf("failed to get photo path: %s", err)
 		return
 	}
-	/*
-		if err != nil {
-			log.Fatalf("ERROR: path query\n %e\n", err)
-		}
-	*/
+
 	f, err := os.Open(path)
 	if err != nil {
 		log.Printf("failed to open photo: %s", err)
@@ -817,6 +816,46 @@ func deletePhotoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	http.Redirect(w, r, path.Join("/album/", albumID), http.StatusFound)
 }
 
+func viewHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	if _, err := checkSesh(w, r, db); err != nil {
+		log.Printf("failed to validate user session: %s, err")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("failed to begin transaction: %s", err)
+		return
+	}
+
+	v := viewpage{}
+
+	if v.UserID, err = strconv.ParseInt(path.Base(r.URL.Path), 10, 64); err != nil {
+		idRow := tx.QueryRow("SELECT id FROM users WHERE email = ?", path.Base(r.URL.Path))
+		if err = idRow.Scan(&v.UserID); err != nil {
+			log.Printf("failed to get id of user to view from URL")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+
+	}
+
+	photoRows, err := tx.Query("SELECT id FROM photos WHERE user_id = ?", v.UserID)
+	if err != nil {
+		log.Printf("failed to query database for photos")
+	}
+
+	if err := v.render(w, r, photoRows); err != nil {
+		log.Printf("failed to render html")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("%s", err)
+	}
+}
+
 func makeHandler(fn func(http.ResponseWriter, *http.Request, *sql.DB), db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
@@ -863,6 +902,7 @@ func main() {
 	http.HandleFunc("/register/", makeHandler(registerHandler, db))
 	http.HandleFunc("/photo/delete/", makeHandler(deletePhotoHandler, db))
 	http.HandleFunc("/album/delete/", makeHandler(deleteAlbumHandler, db))
+	http.HandleFunc("/view/", makeHandler(viewHandler, db))
 
 	log.Println(http.ListenAndServe(fmt.Sprintf(":%v", *port), nil))
 }

@@ -1,0 +1,15 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{{.UserID}}'s page</title>
+    </head>
+    <h1>{{.UserID}}'s page</h1>
+    <ul>
+        {{range .Photos}}
+        <li>
+            <a href="/photo/{{.}}"><img src="/photos/{{.}}" alt="TODO: Photo metadata or tags" style="width: 100px;"></a>
+        </li>
+        {{end}}
+    </ul>
+</html>
