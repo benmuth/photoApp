@@ -1,7 +1,10 @@
 package main
 
 import (
-	//"os/signal"
+	"fmt"
+	"net/http"
+	"strings"
+
 	//"strings"
 	//"fmt"
 	//"net/http"
@@ -14,6 +17,7 @@ import (
 
 func main() {
 	//arg 1 is the name of the program, the rest are the program's args
+	//only runs program in same directory as supervisor
 	cmd := exec.Command("./"+os.Args[1], os.Args[2:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -47,18 +51,19 @@ func main() {
 		log.Printf("exited?: %v", pState.Exited())
 		done <- true
 	}()
-	// cmd.Process.Signal(syscall.SIGINT)
+
 	<-done
-	/*
-		if pState.Exited() == true {
-			client := http.Client{}
-			message := fmt.Sprintf("exited+with+code+%v,+successfully?:+%v+;+%s", pState.ExitCode(), pState.Success(), pState.String())
-			resp, err := client.Post("https://api.pushover.net/1/messages.json", "application/x-www-form-urlencoded", strings.NewReader("token=am38djsk2zp8q2d5eeqveiecddvoiu&user=uyfz5is338ugpgfxa75onm3heaq1kd&message="+message))
-			if err != nil {
-				log.Printf("failed to post message to pushover: %s", err)
-				return
-			}
-			log.Printf("Pushover response: %v", resp.Body)
+	log.Println("supervisor exiting...")
+
+	if pState.Exited() == true {
+		client := http.Client{}
+		message := fmt.Sprintf("exited+with+code+%v,+successfully?:+%v+;+%s", pState.ExitCode(), pState.Success(), pState.String())
+		resp, err := client.Post("https://api.pushover.net/1/messages.json", "application/x-www-form-urlencoded", strings.NewReader("token=am38djsk2zp8q2d5eeqveiecddvoiu&user=uyfz5is338ugpgfxa75onm3heaq1kd&message="+message))
+		if err != nil {
+			log.Printf("failed to post message to pushover: %s", err)
+			return
 		}
-	*/
+		log.Printf("Pushover response: %v", resp.Body)
+	}
+
 }
