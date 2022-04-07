@@ -4,6 +4,7 @@ CREATE TABLE photos (id INTEGER PRIMARY KEY, album_id INTEGER REFERENCES albums(
 CREATE TABLE album_permissions (album_id INTEGER REFERENCES albums(id), user_id INTEGER REFERENCES users(id));
 CREATE TABLE sessions (user_id INTEGER REFERENCES users(id), session_id TEXT UNIQUE);
 CREATE TABLE tags (photo_id INTEGER REFERENCES photos(id), user_id INTEGER REFERENCES users(id));
+CREATE TABLE invites (email TEXT UNIQUE, link TEXT UNIQUE);
 INSERT INTO users (email, password) VALUES ('u1@e.com', '$2a$10$TCRWGbqSjIeS7IXZ.L/PYefrGuQoIclp/OYwSRIORIa4137lEI/BC');
 INSERT INTO users (email, password) VALUES ('u2@e.com', '$2a$10$7rZ2bP0DV2t6qWPZZYT8MeouCGVYtfRMe1s50iq97YvLilYauK6FS'); 
 INSERT INTO albums (user_id, name) VALUES (1, '1 main');
